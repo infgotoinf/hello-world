@@ -1,11 +1,11 @@
 #include <stdio.h>
 
 #include "raylib.h"
-// #define RAYGUI_IMPLEMENTATION
-// #include "raygui.h"
+#define RAYGUI_IMPLEMENTATION
+#include "raygui.h"
 
 #if defined(PLATFORM_WEB)
-    #include <emscripten/emscripten.h>      // Emscripten library
+    #include <emscripten/emscripten.h>
 #endif
 
 
@@ -35,19 +35,19 @@ static void UpdateDrawFrame()
         DrawTexture(logo, logo_pos.x, logo_pos.y, WHITE);
 
         // Draw raygui button
-        // static bool show_text = false;
-        // static const int BUTTON_WIDTH = 200;
-        // if (GuiButton((Rectangle){ logo_pos.x + logo.width * 0.5 - BUTTON_WIDTH * 0.5
-        //                          , logo_pos.y + logo.height + 100
-        //                          , BUTTON_WIDTH
-        //                          , GUI_TEXT_SIZE + GUI_TEXT_MARGIN }, "Play"))
-        // {
-        //     show_text = !show_text;
-        // }
-        // if (show_text)
-        // {
-        //     DrawText("Hello, World!", 200, WINDOW_HEIGHT - 200, GUI_TEXT_SIZE, WHITE);
-        // }
+        static bool show_text = false;
+        static const int BUTTON_WIDTH = 200;
+        if (GuiButton((Rectangle){ logo_pos.x + logo.width * 0.5 - BUTTON_WIDTH * 0.5
+                                 , logo_pos.y + logo.height + 100
+                                 , BUTTON_WIDTH
+                                 , GUI_TEXT_SIZE + GUI_TEXT_MARGIN }, "Play"))
+        {
+            show_text = !show_text;
+        }
+        if (show_text)
+        {
+            DrawText("Hello, World!", 200, WINDOW_HEIGHT - 200, GUI_TEXT_SIZE, WHITE);
+        }
 
         DrawText("Hello, World!", 200, WINDOW_HEIGHT - 100, GUI_TEXT_SIZE, WHITE);
 
@@ -77,7 +77,7 @@ int main ()
     // GuiSetStyle(DEFAULT, TEXT_SIZE, GUI_TEXT_SIZE);
 
     // Load a texture from the resources directory
-    logo = LoadTexture("assets/logo.png");
+    logo = LoadTexture("assets/art/interface/logo.png");
     if (!IsTextureValid(logo)) {
         printf("Couldn't load Texture!");
         return 0;

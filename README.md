@@ -36,7 +36,7 @@ Enjoy 😎 🤙
 ---
 
 <!-- Then README.md is done delete everything above till here, incuding this comment -->
-![$(Game Title)](./assets/logo.png)
+![$(Game Title)](./assets/art/interface/logo.png)
 
 $(Game description)
 
@@ -96,8 +96,8 @@ make help
 
 ## Libraries and other assets used
 
-- [Raylib](https://github.com/raysan5/raylib): Zlib
-- [$(Dependency)](https://link): $(License)
+- [Raylib](https://www.raylib.com/index.html): Zlib
+- [Raygui](https://github.com/raysan5/raygui): Zlib
 - [$(Dependency)](https://link): $(License)
 - [$(Dependency)](https://link): $(License)
 

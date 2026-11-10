@@ -3,9 +3,8 @@
 
 # === Project configuration ===
 # --- Variables ---
-PROJECT_NAME     ?= game
+PROJECT_NAME     ?= hello-world
 PROJECT_LANGUAGE ?= C
-# PROJECT_LANGUAGE ?= C++
 PLATFORM   ?= Desktop
 # PLATFORM   ?= Web
 BUILD_TYPE ?= Debug
@@ -15,8 +14,7 @@ ASSETS_DIR ?= assets
 
 # --- Dependencies ---
 USE_RAYLIB ?= TRUE
-# USE_RAYGUI ?= TRUE
-USE_RAYGUI ?= FALSE
+USE_RAYGUI ?= TRUE
 
 # --- Dependency settings ---
 # You will need to change URL_HASH in CMakeLists.txt after changing a version
