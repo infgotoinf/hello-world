@@ -9,8 +9,8 @@ build
 
 
 # Krita specific
-resources*/*autosave.kra
-resources*/*~
+*autosave.kra
+*.kra~
 
 # Renoise specific
-resources*/*.time-report.txt
+*.time-report.txt

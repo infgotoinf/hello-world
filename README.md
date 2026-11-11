@@ -94,12 +94,20 @@ To view build options:
 make help
 ```
 
-## Libraries and other assets used
+## Made with
+
+### Librarries and other assets
 
 - [Raylib](https://www.raylib.com/index.html): Zlib
 - [Raygui](https://github.com/raysan5/raygui): Zlib
 - [$(Dependency)](https://link): $(License)
 - [$(Dependency)](https://link): $(License)
+
+### Programs
+
+- [Krita](https://krita.org/)
+- [$(Program)](https://link)
+- [$(Program)](https://link)
 
 ## Controls
 
