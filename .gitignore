@@ -12,5 +12,8 @@ build
 *autosave.kra
 *.kra~
 
+# Blender specific
+*.blend1
+
 # Renoise specific
 *.time-report.txt
