@@ -69,23 +69,19 @@ set(FETCHCONTENT_BASE_DIR ${CMAKE_BINARY_DIR}/../../_deps)
 
 # === Dependencies ===
 if (${USE_RAYLIB} STREQUAL "TRUE")
-    if (WIN32)
-        # Make MSYS2 link libraylib.a instead of libraylib.dll.a
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(raylib REQUIRED STATIC IMPORTED_TARGET raylib)
-        target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::raylib)
-    else()
-        # Fetch raylib if it wasn't found
-        # https://github.com/raysan5/raylib/releases
-        FetchContent_Declare(
-            raylib
-            URL https://github.com{RAYLIB_VERSION}.tar.gz
-            URL_HASH SHA256=df7a13129b1bec9e73a6962efff170beba310ee6eab8f94cd000b7316b4db5ee
-            FIND_PACKAGE_ARGS
-        )
-        FetchContent_MakeAvailable(raylib)
-        target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
-    endif()
+    # Fetch raylib if it wasn't found
+    # https://github.com/raysan5/raylib/releases
+    FetchContent_Declare(
+        raylib
+        URL https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION}.tar.gz
+        URL_HASH SHA256=df7a13129b1bec9e73a6962efff170beba310ee6eab8f94cd000b7316b4db5ee
+        FIND_PACKAGE_ARGS
+    )
+
+    FetchContent_MakeAvailable(raylib)
+
+    set(raylib_VERBOSE TRUE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
 endif()
 
 if (${USE_RAYGUI} STREQUAL "TRUE")
