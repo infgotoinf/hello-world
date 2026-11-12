@@ -34,6 +34,9 @@ Enjoy 😎 🤙
 > After you are done making your game don't forget to edit `LICENSE` and this `README.md`, then delete this notice.
 
 ---
+[![Build Project - Linux](https://github.com/infgotoinf/hello-world/actions/workflows/build_linux.yml/badge.svg)](https://github.com/infgotoinf/hello-world/actions/workflows/build_linux.yml)
+[![Build Project - Windows](https://github.com/infgotoinf/hello-world/actions/workflows/build_windows.yml/badge.svg)](https://github.com/infgotoinf/hello-world/actions/workflows/build_windows.yml)
+[![Build Project - WebAssembly](https://github.com/infgotoinf/hello-world/actions/workflows/build_webassembly.yml/badge.svg)](https://github.com/infgotoinf/hello-world/actions/workflows/build_webassembly.yml)
 
 <!-- Then README.md is done delete everything above till here, incuding this comment -->
 ![$(Game Title)](./assets/art/interface/logo.png)
