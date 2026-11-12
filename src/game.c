@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "raylib.h"
+#include "rlgl.h"
 #include "raymath.h"
 
 
@@ -16,11 +17,11 @@
 
 
 // Movement constants
-#define GRAVITY         32.0f
-#define MAX_SPEED       20.0f
+#define GRAVITY         48.0f
+#define MAX_SPEED       7.0f
 #define CROUCH_SPEED     5.0f
 #define JUMP_FORCE      12.0f
-#define MAX_ACCEL      150.0f
+#define MAX_ACCEL      50.0f
 // Grounded drag
 #define FRICTION         0.86f
 // Increasing air drag, increases strafing speed
@@ -29,7 +30,6 @@
 #define CONTROL         15.0f
 #define CROUCH_HEIGHT    0.0f
 #define STAND_HEIGHT     1.0f
-#define BOTTOM_HEIGHT    1.5f
 #define FOV             80.0f
 
 #define NORMALIZE_INPUT  0
@@ -59,6 +59,7 @@ static Camera camera = { 0 };
 
 static Texture2D self_idle;
 
+static Model map;
 
 
 static void DrawLevel(void);
@@ -69,21 +70,31 @@ static void UpdateBody(Body *body, float rot, char side, char forward, bool jump
 
 bool LoadGame(void)
 {
-    camera.fovy = FOV;
-    camera.projection = CAMERA_PERSPECTIVE;
-    camera.position = (Vector3){
-        player.position.x,
-        player.position.y + (BOTTOM_HEIGHT + headLerp),
-        player.position.z,
-    };
-
-    UpdateCameraFPS(&camera); // Update camera parameters
-
     self_idle = LoadTexture("assets/art/sprites/entities/self/idle.png");
     if (!IsTextureValid(self_idle)) {
         printf("Couldn't load Texture!\n");
         return false;
     }
+    map = LoadModel("assets/maps/map.glb");
+    if (!IsModelValid(map)) {
+        printf("Couldn't load Model!\n");
+        return false;
+    }
+
+    camera.fovy = FOV;
+    camera.projection = CAMERA_PERSPECTIVE;
+    BoundingBox box = GetMeshBoundingBox(map.meshes[1]);
+    player.position = (Vector3){
+        (box.min.x + box.max.x) * 0.5f,
+        (box.min.y + box.max.y) * 0.5f,
+        (box.min.z + box.max.z) * 0.5f
+    };
+    camera.position = (Vector3){
+        player.position.x,
+        player.position.y + headLerp,
+        player.position.z,
+    };
+    UpdateCameraFPS(&camera); // Update camera parameters
 
     return true;
 }
@@ -106,7 +117,7 @@ void DrawGame(void)
     headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
     camera.position = (Vector3){
         player.position.x,
-        player.position.y + (BOTTOM_HEIGHT + headLerp),
+        player.position.y + headLerp,
         player.position.z,
     };
 
@@ -146,8 +157,8 @@ void DrawGame(void)
         DrawText("- Move keys: W, A, S, D, Space, Left-Ctrl", 15, 30, 10, BLACK);
         DrawText("- Look around: arrow keys or mouse", 15, 45, 10, BLACK);
         DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.velocity.x, player.velocity.z })), 15, 60, 10, BLACK);
-        // DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 200, 100, 10, WHITE);
-
+        DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 100, 100, 10, PURPLE);
+        DrawText(TextFormat("Player Pos: %03.02f %03.02f", camera.position.x, camera.position.y), 100, 120, 10, PURPLE);
 
     EndDrawing();
 }
@@ -209,12 +220,26 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     body->position.y += body->velocity.y*delta;
     body->position.z += body->velocity.z*delta;
 
-    // Fancy collision system against the floor
-    if (body->position.y <= 0.0f)
+    //       ^
+    //   ()  |  - floorCollision
+    //  /|\  |
+    //  /\   +
+    //       |  - floorDistance
+    //       |
+    //       V
+
+    RayCollision floorDistance = GetRayCollisionMesh((Ray){ player.position, (Vector3){ player.position.x, -1000, player.position.z} }, map.meshes[0], map.transform);
+    if (floorDistance.hit && floorDistance.distance >= 0.01)
+        body->isGrounded = true;
+    else
+        body->isGrounded = false;
+
+    RayCollision floorCollision = GetRayCollisionMesh((Ray){ player.position, (Vector3){ player.position.x, +1000, player.position.z} }, map.meshes[0], map.transform);
+    if (floorCollision.hit && floorCollision.distance <= 0.001)
     {
-        body->position.y = 0.0f;
+        body->position.y = floorCollision.point.y;
         body->velocity.y = 0.0f;
-        body->isGrounded = true; // Enable jumping
+        body->isGrounded = true;
     }
 }
 
@@ -223,7 +248,6 @@ static void UpdateCameraFPS(Camera *camera)
 {
     const Vector3 up = (Vector3){ 0.0f, 1.0f, 0.0f };
     const Vector3 targetOffset = (Vector3){ 0.0f, 0.0f, -1.0f };
-
     // Left and right
     Vector3 yaw = Vector3RotateByAxisAngle(targetOffset, up, lookRotation.x);
 
@@ -266,26 +290,15 @@ static void UpdateCameraFPS(Camera *camera)
 // Draw game level
 static void DrawLevel(void)
 {
-    const int floorExtent = 25;
-    const float tileSize = 1.0f;
+    rlDisableBackfaceCulling();
+    DrawModel(map, (Vector3){ 0.0f }, 1.0f, WHITE);
+    DrawModelWires(map, (Vector3){ 0.0f }, 1.0f, BLACK);
+    rlEnableBackfaceCulling();
 
-    // Floor tiles
-    for (int y = -floorExtent; y < floorExtent; y++)
-    {
-        for (int x = -floorExtent; x < floorExtent; x++)
-        {
-            if ((y & 1) && (x & 1))
-            {
-                DrawPlane((Vector3){ x*tileSize, 0.0f, y*tileSize}, (Vector2){ tileSize, tileSize }, GRAY);
-            }
-            else if (!(y & 1) && !(x & 1))
-            {
-                DrawPlane((Vector3){ x*tileSize, 0.0f, y*tileSize}, (Vector2){ tileSize, tileSize }, LIGHTGRAY);
-            }
-        }
-    }
-
-    // DrawCube((Vector3){ -16.0f, 2.5f, 0.0f }, 1.0f, 5.0f, 32.0f, BLUE);
-    // DrawPlane((Vector3){ -16.0f, 2.5f, 0.0f }, (Vector2){ 5.0f, 32.0f }, BLUE);
-    DrawBillboard(camera, self_idle, (Vector3){ -16.0f, self_idle.height*0.0055, 0.0f }, 3, WHITE);
+    BoundingBox box = GetMeshBoundingBox(map.meshes[2]);
+    DrawBillboard(camera, self_idle, (Vector3){
+                                         (box.min.x + box.max.x) * 0.5f,
+                                         (box.min.y + box.max.y) * 0.5f,
+                                         (box.min.z + box.max.z) * 0.5f
+                                     }, 3, WHITE);
 }
