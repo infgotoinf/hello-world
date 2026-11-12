@@ -19,6 +19,18 @@ else()
     set(CMAKE_BUILD_TYPE "${BUILD_TYPE}")
 endif()
 
+# --- OS and PLATFORM specific configuration ---
+if ("${PLATFORM}" STREQUAL "Desktop")
+    # APPLE and BSD to clang, cause this is how it's done in the official raylib template
+    # if (APPLE OR BSD)
+    #     set(CMAKE_C_COMPILER   clang)
+    #     set(CMAKE_CXX_COMPILER clang++)
+    # else()
+        set(CMAKE_C_COMPILER   gcc)
+        set(CMAKE_CXX_COMPILER g++)
+    # endif()
+endif()
+
 if ("${PROJECT_LANGUAGE}" STREQUAL "C")
     project("${PROJECT_NAME}" C)
 elseif ("${PROJECT_LANGUAGE}" STREQUAL "C++")
@@ -37,19 +49,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # Generate compile_commands.json
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET FALSE) # Show download progress
-
-
-# --- OS and PLATFORM specific configuration ---
-if ("${PLATFORM}" STREQUAL "Desktop")
-    # APPLE and BSD to clang, cause this is how it's done in the official raylib template
-    if (APPLE OR BSD)
-        set(CMAKE_C_COMPILER   clang)
-        set(CMAKE_CXX_COMPILER clang++)
-    else()
-        set(CMAKE_C_COMPILER   gcc)
-        set(CMAKE_CXX_COMPILER g++)
-    endif()
-endif()
 
 
 
@@ -149,6 +148,7 @@ if ("${PLATFORM}" STREQUAL "Web")
     endif()
 elseif ("${PLATFORM}" STREQUAL "Desktop")
     if (WIN32)
+        target_link_options(${PROJECT_NAME} PRIVATE -static)
         target_link_libraries(${PROJECT_NAME}
             PRIVATE
                 opengl32

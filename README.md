@@ -58,11 +58,11 @@ You must install [MSYS2](https://www.msys2.org/) and launch **UCRT64** console i
 ```
 pacman -S mingw-w64-ucrt-x86_64-gcc \
     mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja make \
-    mingw-w64-ucrt-x86_64-raylib mingw-w64-ucrt-x86_64-emscripten
+    mingw-w64-ucrt-x86_64-emscripten
 ```
 
 > [!NOTE]
-> Raylib is optional (it get fetched if not found). You need emscripten only if you build for the Web.
+> You can use Raylib package unless you are on Windows. You need emscripten only if you build for the Web.
 
 ### Unix
 
