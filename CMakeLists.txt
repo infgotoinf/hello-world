@@ -68,6 +68,11 @@ set(FETCHCONTENT_BASE_DIR ${CMAKE_BINARY_DIR}/../../_deps)
 
 
 # === Dependencies ===
+if (WIN32)
+    # Tell CMake to prefer static .a over dynamic .dll.a libraries
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+endif()
+
 if (${USE_RAYLIB} STREQUAL "TRUE")
     # Fetch raylib if it wasn't found
     # https://github.com/raysan5/raylib/releases
