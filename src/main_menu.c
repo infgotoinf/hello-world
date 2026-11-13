@@ -1,4 +1,4 @@
-#include "include/menus.h"
+#include "include/main_menu.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -32,10 +32,10 @@ void UnloadMainMenu(void) {
 
 void DrawMainMenu(void) {
     static bool play = false;
-    static bool prev_freme_play = false;
+    static bool prevFramePlay = false;
 
-    if (prev_freme_play != play) {
-        if (prev_freme_play == false)
+    if (prevFramePlay != play) {
+        if (prevFramePlay == false)
             DisableCursor();
         else
             EnableCursor();
@@ -43,7 +43,7 @@ void DrawMainMenu(void) {
 
     if (play) {
         DrawGame();
-        prev_freme_play = true;
+        prevFramePlay = true;
     }
     else {
         BeginDrawing();

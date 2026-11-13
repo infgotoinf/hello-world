@@ -1,5 +1,5 @@
-#ifndef MENUS_H
-#define MENUS_H
+#ifndef MAIN_MENU_H
+#define MAIN_MENU_H
 
 #include <stdbool.h>
 
@@ -13,4 +13,4 @@ void DrawMainMenu(void);
 
 
 
-#endif // MENUS_H
+#endif // MAIN_MENU_H

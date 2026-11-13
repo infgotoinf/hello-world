@@ -1,6 +1,7 @@
 #ifndef GLOBAL_VARS_H
 #define GLOBAL_VARS_H
 
+#include "raylib.h"
 
 
 // Defining constants
@@ -10,6 +11,10 @@
 
 #define GUI_TEXT_SIZE 20
 #define GUI_TEXT_MARGIN 10
+
+
+
+static RenderTexture2D target;
 
 
 

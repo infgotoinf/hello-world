@@ -7,6 +7,9 @@
 #include "rlgl.h"
 #include "raymath.h"
 
+#include "include/global_vars.h"
+#include "include/pause.h"
+
 
 // Used code from:
 // "3d camera fps" example: https://www.raylib.com/examples/core/loader.html?name=core_3d_camera_fps
@@ -18,18 +21,18 @@
 
 // Movement constants
 #define GRAVITY         48.0f
-#define MAX_SPEED       7.0f
+#define MAX_SPEED        7.0f
 #define CROUCH_SPEED     5.0f
 #define JUMP_FORCE      12.0f
-#define MAX_ACCEL      50.0f
+#define MAX_ACCEL       50.0f
 // Grounded drag
-#define FRICTION         0.86f
+#define FRICTION        0.86f
 // Increasing air drag, increases strafing speed
-#define AIR_DRAG         0.98f
+#define AIR_DRAG        0.98f
 // Responsiveness for turning movement direction to looked direction
 #define CONTROL         15.0f
-#define CROUCH_HEIGHT    0.0f
-#define STAND_HEIGHT     1.0f
+#define CROUCH_HEIGHT    1.0f
+#define STAND_HEIGHT     2.0f
 #define FOV             80.0f
 
 #define NORMALIZE_INPUT  0
@@ -80,13 +83,14 @@ bool LoadGame(void)
         printf("Couldn't load Model!\n");
         return false;
     }
+    target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
 
     camera.fovy = FOV;
     camera.projection = CAMERA_PERSPECTIVE;
     BoundingBox box = GetMeshBoundingBox(map.meshes[1]);
     player.position = (Vector3){
         (box.min.x + box.max.x) * 0.5f,
-        (box.min.y + box.max.y) * 0.5f,
+        (box.min.x + box.max.x) * 0.5f,
         (box.min.z + box.max.z) * 0.5f
     };
     camera.position = (Vector3){
@@ -100,67 +104,116 @@ bool LoadGame(void)
 }
 
 
+void UnloadGame(void)
+{
+    UnloadTexture(self_idle);
+    UnloadModel(map);
+}
+
+
 void DrawGame(void)
 {
-    // Update
-    //----------------------------------------------------------------------------------
-    Vector2 mouseDelta = GetMouseDelta();
-    lookRotation.x -= mouseDelta.x*sensitivity.x;
-    lookRotation.y += mouseDelta.y*sensitivity.y;
+    static bool isPaused = false;
+    static bool prevFramePaused = false;
 
-    char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
-    char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
-    bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
-    UpdateBody(&player, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
+    if (prevFramePaused != isPaused) {
+        if (prevFramePaused == true)
+        {
+            DisableCursor();
+        }
+        else
+        {
+            EnableCursor();
+            BeginTextureMode(target);
+                ClearBackground(RAYWHITE);
+                DrawTexturePro(target.texture, (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
+                        (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height }, (Vector2){ 0, 0 }, 0.0f, WHITE);
 
-    float delta = GetFrameTime();
-    headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
-    camera.position = (Vector3){
-        player.position.x,
-        player.position.y + headLerp,
-        player.position.z,
-    };
+                DrawRectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (Color){ 0, 0, 0, 100 });
+            EndTextureMode();
 
-    if (player.isGrounded && ((forward != 0) || (sideway != 0)))
+            BeginDrawing();
+                DrawTexturePro(target.texture, (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
+                        (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height }, (Vector2){ 0, 0 }, 0.0f, WHITE);
+            EndDrawing();
+        }
+
+        prevFramePaused = isPaused;
+    }
+
+    if (IsKeyPressed(KEY_ESCAPE))
+        isPaused = !isPaused;
+
+    if (isPaused)
     {
-        headTimer += delta*3.0f;
-        walkLerp = Lerp(walkLerp, 1.0f, 10.0f*delta);
-        camera.fovy = Lerp(camera.fovy, FOV - 5.0f, 5.0f*delta);
+        isPaused = DrawPause();
     }
     else
     {
-        walkLerp = Lerp(walkLerp, 0.0f, 10.0f*delta);
-        camera.fovy = Lerp(camera.fovy, FOV, 5.0f*delta);
+        // Update
+        //----------------------------------------------------------------------------------
+        Vector2 mouseDelta = GetMouseDelta();
+        lookRotation.x -= mouseDelta.x*sensitivity.x;
+        lookRotation.y += mouseDelta.y*sensitivity.y;
+
+        char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
+        char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
+        bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
+        UpdateBody(&player, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
+
+        float delta = GetFrameTime();
+        headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
+        camera.position = (Vector3){
+            player.position.x,
+            player.position.y + headLerp,
+            player.position.z,
+        };
+
+        if (player.isGrounded && ((forward != 0) || (sideway != 0)))
+        {
+            headTimer += delta*3.0f;
+            walkLerp = Lerp(walkLerp, 1.0f, 10.0f*delta);
+            camera.fovy = Lerp(camera.fovy, FOV - 5.0f, 5.0f*delta);
+        }
+        else
+        {
+            walkLerp = Lerp(walkLerp, 0.0f, 10.0f*delta);
+            camera.fovy = Lerp(camera.fovy, FOV, 5.0f*delta);
+        }
+
+        lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
+        lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
+
+        UpdateCameraFPS(&camera);
+        //----------------------------------------------------------------------------------
+
+        // Draw
+        //----------------------------------------------------------------------------------
+        BeginTextureMode(target);
+            ClearBackground(RAYWHITE);
+
+            BeginMode3D(camera);
+                DrawLevel();
+            EndMode3D();
+
+            // Draw info box
+            DrawRectangle(5, 5, 330, 75, Fade(SKYBLUE, 0.5f));
+            DrawRectangleLines(5, 5, 330, 75, BLUE);
+
+            DrawText("Camera controls:", 15, 15, 10, BLACK);
+            DrawText("- Move keys: W, A, S, D, Space, Left-Ctrl", 15, 30, 10, BLACK);
+            DrawText("- Look around: arrow keys or mouse", 15, 45, 10, BLACK);
+            DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.velocity.x, player.velocity.z })), 15, 60, 10, BLACK);
+            DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 100, 100, 10, PURPLE);
+            DrawText(TextFormat("Player Pos: %03.02f %03.02f", camera.position.x, camera.position.y), 100, 120, 10, PURPLE);
+            DrawText(TextFormat("Player isGrounded: %d", player.isGrounded), 100, 140, 10, PURPLE);
+        EndTextureMode();
+
+        BeginDrawing();
+            DrawTexturePro(target.texture, (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
+                    (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height }, (Vector2){ 0, 0 }, 0.0f, WHITE);
+        EndDrawing();
     }
-
-    lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
-    lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
-
-    UpdateCameraFPS(&camera);
-    //----------------------------------------------------------------------------------
-
-    // Draw
-    //----------------------------------------------------------------------------------
-    BeginDrawing();
-
-        ClearBackground(RAYWHITE);
-
-        BeginMode3D(camera);
-            DrawLevel();
-        EndMode3D();
-
-        // Draw info box
-        DrawRectangle(5, 5, 330, 75, Fade(SKYBLUE, 0.5f));
-        DrawRectangleLines(5, 5, 330, 75, BLUE);
-
-        DrawText("Camera controls:", 15, 15, 10, BLACK);
-        DrawText("- Move keys: W, A, S, D, Space, Left-Ctrl", 15, 30, 10, BLACK);
-        DrawText("- Look around: arrow keys or mouse", 15, 45, 10, BLACK);
-        DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.velocity.x, player.velocity.z })), 15, 60, 10, BLACK);
-        DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 100, 100, 10, PURPLE);
-        DrawText(TextFormat("Player Pos: %03.02f %03.02f", camera.position.x, camera.position.y), 100, 120, 10, PURPLE);
-
-    EndDrawing();
 }
 
 //----------------------------------------------------------------------------------

@@ -7,14 +7,10 @@
 #endif
 
 #include "include/global_vars.h"
-#include "include/menus.h"
+#include "include/main_menu.h"
 #include "include/game.h"
 
 
-
-void DrawPause(void) {
-
-}
 
 void DrawGameOver(void) {
 
@@ -48,6 +44,8 @@ int main ()
         return 0;
     }
 
+    SetExitKey(KEY_NULL);
+
 
     // Main loop
 #if defined(PLATFORM_WEB)
@@ -64,6 +62,7 @@ int main ()
 
     // Cleanup
     UnloadMainMenu();
+    UnloadGame();
 
     // Destroy the window and cleanup the OpenGL context
     CloseWindow();
