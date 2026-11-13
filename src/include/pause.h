@@ -5,7 +5,17 @@
 
 
 
-bool DrawPause(void);
+typedef enum {
+    PAUSE
+   ,CONTINUE
+   ,RESTART
+   ,MAIN_MENU
+   ,EXIT_TO_DESKTOP
+} PauseCode;
+
+
+
+PauseCode DrawPause(void);
 
 
 

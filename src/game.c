@@ -146,7 +146,21 @@ void DrawGame(void)
 
     if (isPaused)
     {
-        isPaused = DrawPause();
+        switch(DrawPause()) {
+        case PAUSE:
+        default:
+            // Keep everything as it is
+            break;
+        case CONTINUE:
+            isPaused = false;
+            break;
+        case RESTART:
+            break;
+        case MAIN_MENU:
+            break;
+        case EXIT_TO_DESKTOP:
+            break;
+        }
     }
     else
     {
