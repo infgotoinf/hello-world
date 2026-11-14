@@ -124,7 +124,8 @@ if (NOT ("${PLATFORM}" STREQUAL "Web"))
 endif()
 
 
-# === OS and PLATFORM specific configurations ===
+
+# === OS, PLATFORM and BUILD_TYPE specific configurations ===
 if ("${PLATFORM}" STREQUAL "Web")
     set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
     target_link_libraries(${PROJECT_NAME}
@@ -147,6 +148,20 @@ if ("${PLATFORM}" STREQUAL "Web")
         )
     endif()
 elseif ("${PLATFORM}" STREQUAL "Desktop")
+    if ("${BUILD_TYPE}" STREQUAL "Debug")
+        target_compile_options(${PROJECT_NAME} PRIVATE )
+        target_compile_options(${PROJECT_NAME}
+            PRIVATE
+                -Wall               # Enables standard helpful warnings
+                -Wextra             # Enables extra warnings (like unused variables/parameters)
+                -Wpedantic          # Enforces strict ISO C compliance
+                -Wshadow            # Warns if a local variable hides another variable
+                # -Wdouble-promotion  # Warns if a float is accidentally promoted to a double
+                # -Wconversion        # Warns on implicit type conversions (e.g., float to int)
+                -Wuninitialized     # Warns if you use a variable before setting a value
+        )
+    endif()
+
     if (WIN32)
         target_link_options(${PROJECT_NAME} PRIVATE -static)
         target_link_libraries(${PROJECT_NAME}
