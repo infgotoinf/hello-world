@@ -38,7 +38,7 @@ Enjoy 😎 🤙
 [![Build Project - Windows](https://github.com/infgotoinf/hello-world/actions/workflows/build_windows.yml/badge.svg)](https://github.com/infgotoinf/hello-world/actions/workflows/build_windows.yml)
 [![Build Project - WebAssembly](https://github.com/infgotoinf/hello-world/actions/workflows/build_webassembly.yml/badge.svg)](https://github.com/infgotoinf/hello-world/actions/workflows/build_webassembly.yml)
 
-<!-- Then README.md is done delete everything above till here, incuding this comment -->
+<!-- Then README.md is done delete everything above till here, including this comment -->
 ![$(Game Title)](./assets/art/interface/logo.png)
 
 $(Game description)
@@ -99,7 +99,7 @@ make help
 
 ## Made with
 
-### Librarries and other assets
+### Libraries and other assets
 
 - [Raylib](https://www.raylib.com/index.html): Zlib
 - [Raygui](https://github.com/raysan5/raygui): Zlib

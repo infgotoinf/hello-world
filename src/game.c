@@ -1,5 +1,6 @@
 #include "include/game.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 
@@ -15,14 +16,11 @@
 // "3d camera fps" example: https://www.raylib.com/examples/core/loader.html?name=core_3d_camera_fps
 // Zlib license
 
-// "directional billboard" example: https://www.raylib.com/examples/models/loader.html?name=models_directional_billboard
-// Zlib license
-
 
 // Movement constants
-#define GRAVITY         48.0f
+#define GRAVITY         46.0f
 #define MAX_SPEED        7.0f
-#define CROUCH_SPEED     5.0f
+#define CROUCH_SPEED     2.5f
 #define JUMP_FORCE      12.0f
 #define MAX_ACCEL       50.0f
 // Grounded drag
@@ -31,9 +29,11 @@
 #define AIR_DRAG        0.98f
 // Responsiveness for turning movement direction to looked direction
 #define CONTROL         15.0f
-#define CROUCH_HEIGHT    1.0f
-#define STAND_HEIGHT     2.0f
+#define CROUCH_HEIGHT    0.5f
+#define STAND_HEIGHT     1.5f
 #define FOV             80.0f
+
+#define DEFAULT_BODY_SIZE 0.25f
 
 #define NORMALIZE_INPUT  0
 
@@ -44,6 +44,7 @@ typedef struct {
     Vector3 position;
     Vector3 velocity;
     Vector3 dir;
+    float size;
     bool isGrounded;
 } Body;
 
@@ -57,8 +58,10 @@ static float headTimer = 0.0f;
 static float walkLerp = 0.0f;
 static float headLerp = STAND_HEIGHT;
 static Vector2 lean = { 0 };
-
 static Camera camera = { 0 };
+
+// static RayCollision raycollision1;
+// static RayCollision raycollision2;
 
 static Texture2D self_idle;
 
@@ -67,6 +70,7 @@ static Model map;
 
 static void DrawLevel(void);
 static void UpdateCameraFPS(Camera *camera);
+static bool CheckBodyWallCollision(Body *body);
 static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
 
 
@@ -93,6 +97,7 @@ bool LoadGame(void)
         (box.min.x + box.max.x) * 0.5f,
         (box.min.z + box.max.z) * 0.5f
     };
+    player.size = DEFAULT_BODY_SIZE;
     camera.position = (Vector3){
         player.position.x,
         player.position.y + headLerp,
@@ -164,6 +169,16 @@ void DrawGame(void)
     }
     else
     {
+        static Vector3 cameraPosAdd = { 0 };
+        if (IsKeyDown(KEY_DOWN))
+        {
+            cameraPosAdd.x += 0.1;
+        }
+        if (IsKeyDown(KEY_UP))
+        {
+            cameraPosAdd.x -= 0.1;
+        }
+
         // Update
         //----------------------------------------------------------------------------------
         Vector2 mouseDelta = GetMouseDelta();
@@ -178,7 +193,7 @@ void DrawGame(void)
         float delta = GetFrameTime();
         headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
         camera.position = (Vector3){
-            player.position.x,
+            player.position.x + cameraPosAdd.x,
             player.position.y + headLerp,
             player.position.z,
         };
@@ -216,11 +231,28 @@ void DrawGame(void)
 
             DrawText("Camera controls:", 15, 15, 10, BLACK);
             DrawText("- Move keys: W, A, S, D, Space, Left-Ctrl", 15, 30, 10, BLACK);
-            DrawText("- Look around: arrow keys or mouse", 15, 45, 10, BLACK);
+            DrawText("- Look around: mouse", 15, 45, 10, BLACK);
             DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.velocity.x, player.velocity.z })), 15, 60, 10, BLACK);
             DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 100, 100, 10, PURPLE);
             DrawText(TextFormat("Player Pos: %03.02f %03.02f", camera.position.x, camera.position.y), 100, 120, 10, PURPLE);
             DrawText(TextFormat("Player isGrounded: %d", player.isGrounded), 100, 140, 10, PURPLE);
+            DrawText(TextFormat("%02.02f %02.02f %02.02f", player.dir.x, player.dir.y, player.dir.z), 100, 160, 10, PURPLE);
+
+            // static const int numberOfDirections = 8;
+            // // Using radians instead of degrees
+            // // 360 degrees = 2 * PI radians
+            // // This is because cos() and sin() expect angles in radians
+            // static const float rayAngleDifference = 2 * PI / (float)numberOfDirections;
+            // static const float radius = 75.0f;
+
+            // static const Vector2 center = { WINDOW_WIDTH - 100, 100 };
+
+            // for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+            // {
+            //     // https://gamemath.com/book/cartesianspace.html#trig_functins
+            //     // cos(angle) = x, sin(angle) = y
+            //     DrawLineV(center, (Vector2) { center.x - cos(i) * radius, center.y - sin(i) * radius }, RED);
+            // }
         EndTextureMode();
 
         BeginDrawing();
@@ -283,10 +315,63 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     body->velocity.x = hvel.x;
     body->velocity.z = hvel.z;
 
-    body->position.x += body->velocity.x*delta;
     body->position.y += body->velocity.y*delta;
+    body->position.x += body->velocity.x*delta;
     body->position.z += body->velocity.z*delta;
 
+    // Checking wall collision
+    static const int numberOfDirections = 8;
+    // Using radians instead of degrees
+    // 360 degrees = 2 * PI radians
+    // This is because cos() and sin() expect angles in radians
+    static const float rayAngleDifference = 2 * PI / (float)numberOfDirections;
+
+    for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+    {
+        // https://gamemath.com/book/cartesianspace.html#trig_functins
+        // cos(angle) = x, sin(angle) = y
+        RayCollision ray = GetRayCollisionMesh((Ray){ (Vector3){ body->position.x
+                                                               , body->position.y + CROUCH_HEIGHT
+                                                               , body->position.z }
+                                                    , (Vector3){ cos(i)
+                                                               , 0
+                                                               , sin(i) } }, map.meshes[0], map.transform);
+        if (ray.hit && ray.distance < body->size)
+        {
+            float clip = body->size - ray.distance;
+
+            // We reverse clip, if dot product of body.velocity and ray.normal is positive (if
+            // body.vector and ray.normal look in the same direction):
+            //
+            //     ray.normal . ray.velocity
+            //
+            // More about dot product: https://gamemath.com/book/vectors.html#dot_product_math
+            //
+            // We do this, so we don't clip through a wall with a reversed orientation and since we
+            // have plane walls and planes have only one orientation, we need this, otherwise:
+            // - The side of the wall with our orientation will have a nice collision
+            // - And the other one will teleport us to the first side
+            //
+            // ray.normal when hitting right and wrong wall orientation:
+            //
+            //                                  >
+            //                                /
+            //                              /
+            //      xxxxxxxxx       ---------
+            //      ---------       xxxx/xxxx
+            //         / \            /
+            //       /    \         /
+            //     /       >      /
+            //
+            if (ray.normal.x * body->velocity.x + ray.normal.z * body->velocity.z > 0) clip *= -1;
+            body->position = Vector3Add(body->position, (Vector3){ ray.normal.x * clip
+                                                                 , 0
+                                                                 , ray.normal.z * clip });
+        }
+    }
+
+    // Checking floor collision
+    //
     //       ^
     //   ()  |  - floorCollision
     //  /|\  |
@@ -295,13 +380,11 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     //       |
     //       V
 
-    RayCollision floorDistance = GetRayCollisionMesh((Ray){ player.position, (Vector3){ player.position.x, -1000, player.position.z} }, map.meshes[0], map.transform);
-    if (floorDistance.hit && floorDistance.distance >= 0.01)
-        body->isGrounded = true;
-    else
+    RayCollision floorDistance = GetRayCollisionMesh((Ray){ body->position, (Vector3){ body->position.x, -1000, body->position.z} }, map.meshes[0], map.transform);
+    if (floorDistance.hit && floorDistance.distance <= 0.01)
         body->isGrounded = false;
 
-    RayCollision floorCollision = GetRayCollisionMesh((Ray){ player.position, (Vector3){ player.position.x, +1000, player.position.z} }, map.meshes[0], map.transform);
+    RayCollision floorCollision = GetRayCollisionMesh((Ray){ body->position, (Vector3){ body->position.x, +1000, body->position.z} }, map.meshes[0], map.transform);
     if (floorCollision.hit && floorCollision.distance <= 0.001)
     {
         body->position.y = floorCollision.point.y;
@@ -358,11 +441,47 @@ static void UpdateCameraFPS(Camera *camera)
 static void DrawLevel(void)
 {
     rlDisableBackfaceCulling();
-    DrawModel(map, (Vector3){ 0.0f }, 1.0f, WHITE);
+    DrawMesh(map.meshes[0], map.materials[0], map.transform);
     DrawModelWires(map, (Vector3){ 0.0f }, 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
     BoundingBox box = GetMeshBoundingBox(map.meshes[2]);
+
+    static const int numberOfDirections = 8;
+    // Using radians instead of degrees
+    // 360 degrees = 2 * PI radians
+    // This is because cos() and sin() expect angles in radians
+    static const float rayAngleDifference = 2 * PI / (float)numberOfDirections;
+
+    static const Vector2 center = { WINDOW_WIDTH - 100, 100 };
+
+    for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+    {
+        // https://gamemath.com/book/cartesianspace.html#trig_functins
+        // cos(angle) = x, sin(angle) = y
+        // Ray ray = { (Vector3){ player.position.x
+        //                      , player.position.y + CROUCH_HEIGHT
+        //                      , player.position.z }
+        //           , (Vector3){ cos(i) * player.size
+        //                      , 0
+        //                      , sin(i) * player.size } };
+        // DrawRay(ray, BLUE);
+
+        DrawSphere( (Vector3){ player.position.x + cos(i) * player.size
+                             , player.position.y + CROUCH_HEIGHT
+                             , player.position.z + sin(i) * player.size }, 0.01f, BLACK);
+    }
+
+    DrawRay((Ray){ (Vector3){ player.position.x
+                            , player.position.y + CROUCH_HEIGHT
+                            , player.position.z }
+                 , player.dir }, ORANGE);
+
+    DrawRay((Ray){ (Vector3){ player.position.x
+                            , player.position.y + CROUCH_HEIGHT
+                            , player.position.z }
+                 , player.velocity }, YELLOW);
+
     DrawBillboard(camera, self_idle, (Vector3){
                                          (box.min.x + box.max.x) * 0.5f,
                                          (box.min.y + box.max.y) * 0.5f,

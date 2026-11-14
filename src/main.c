@@ -33,7 +33,7 @@ int main ()
     );
 
     // Create the window and OpenGL context
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Hello World from Raylib");
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Hello, World!");
 
     // Set text size for raygui elements
     GuiSetStyle(DEFAULT, TEXT_SIZE, GUI_TEXT_SIZE);
