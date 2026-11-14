@@ -51,7 +51,7 @@ void DrawMainMenu(void) {
             ClearBackground(DARKGRAY);
 
             Vector2 logo_pos = { (WINDOW_WIDTH - logo.width) * 0.5, 100 };
-            DrawTexture(logo, logo_pos.x, logo_pos.y, WHITE);
+            DrawTexture(logo, (int)logo_pos.x, (int)logo_pos.y, WHITE);
 
             // Draw raygui button
             static const int BUTTON_WIDTH = 200;

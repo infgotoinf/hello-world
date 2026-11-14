@@ -14,8 +14,4 @@
 
 
 
-static RenderTexture2D target;
-
-
-
 #endif // GLOBAL_VARS_H
