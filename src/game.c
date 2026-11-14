@@ -1,5 +1,6 @@
 #include "include/game.h"
 
+#include <assert.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -73,7 +74,7 @@ static Model map;
 
 static void DrawLevel(void);
 static void UpdateCameraFPS(void);
-static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
+static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
 
 
 
@@ -193,7 +194,8 @@ void DrawGame(void)
         char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
         char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
         bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
-        UpdateBody(&player, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
+        UpdateBody(&player, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), &crouching);
+        prevFrameCrouchHold = crouching;
 
         float delta = GetFrameTime();
         headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
@@ -275,7 +277,7 @@ void DrawGame(void)
 // Module Functions Definition
 //----------------------------------------------------------------------------------
 // Update body considering current world state
-void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold)
+void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool *crouchHold)
 {
     Vector2 input = (Vector2){ (float)side, (float)-forward };
 
@@ -284,11 +286,40 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     if ((side != 0) && (forward != 0)) input = Vector2Normalize(input);
 #endif
 
+    // Cheking that player can stand up
+    static const int numberOfDirections = 8;
+    // Using radians instead of degrees
+    // 360 degrees = 2 * PI radians
+    // This is because cos() and sin() expect angles in radians
+    static const float rayAngleDifference = 2*PI / (float)numberOfDirections;
+    // (Sorry for duplicating this for loop i'm cringe
+    if (prevFrameCrouchHold == true && *crouchHold == false)
+    {
+        for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+        {
+            const Ray heightRay = { (Vector3){ body->position.x + cos(i)*(body->size)
+                                             , body->position.y + CROUCH_HEIGHT
+                                             , body->position.z + sin(i)*(body->size) }
+                                  , (Vector3){ 0
+                                             , STAND_HEIGHT - CROUCH_HEIGHT
+                                             , 0 } };
+            const RayCollision crouchCeilingCollision =
+                    GetRayCollisionMesh(heightRay, map.meshes[0], map.transform);
+
+
+            if (crouchCeilingCollision.hit && crouchCeilingCollision.distance < STAND_HEIGHT - CROUCH_HEIGHT)
+            {
+                *crouchHold = true;
+                break;
+            }
+        }
+    }
+
     float delta = GetFrameTime();
 
     if (!body->isGrounded) body->velocity.y -= GRAVITY*delta;
 
-    if (body->isGrounded && jumpPressed && !crouchHold)
+    if (body->isGrounded && jumpPressed && !*crouchHold)
     {
         body->velocity.y = JUMP_FORCE;
         body->isGrounded = false;
@@ -318,7 +349,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     // Whenever the amount of acceleration to add is clamped by the maximum acceleration constant,
     // a Player can make the speed faster by bringing the direction closer to horizontal velocity angle
     // More info here: https://youtu.be/v3zT3Z5apaM?t=165
-    float maxSpeed = (crouchHold ? CROUCH_SPEED : MAX_SPEED);
+    float maxSpeed = (*crouchHold ? CROUCH_SPEED : MAX_SPEED);
     float accel = Clamp(maxSpeed - speed, 0.f, MAX_ACCEL*delta);
     hvel.x += body->dir.x*accel;
     hvel.z += body->dir.z*accel;
@@ -330,17 +361,14 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     body->position.x += body->velocity.x*delta;
     body->position.z += body->velocity.z*delta;
 
-    // Checking wall collision
-    static const int numberOfDirections = 8;
-    // Using radians instead of degrees
-    // 360 degrees = 2 * PI radians
-    // This is because cos() and sin() expect angles in radians
-    static const float rayAngleDifference = 2*PI / (float)numberOfDirections;
-
+    //----------------------------------------------------------------------------------
+    // Checking collision
+    //----------------------------------------------------------------------------------
     bool skipGroundCollisionCheck = false;
-
     for (float i = 0; i < 2 * PI; i += rayAngleDifference)
     {
+        // Wall collision
+        //----------------------------------------------------------------------------------
         // https://gamemath.com/book/cartesianspace.html#trig_functins
         // cos(angle) = x, sin(angle) = y
         const RayCollision *collidingRay = NULL;
@@ -352,10 +380,6 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                        , 0
                                        , sin(i) } };
 
-        const RayCollision downWallCollision = GetRayCollisionMesh(kneeRay, map.meshes[0], map.transform);
-        if (downWallCollision.hit && downWallCollision.distance < body->size)
-            collidingRay = &downWallCollision;
-
         const Ray headRay = { (Vector3){ body->position.x
                                        , body->position.y + STAND_HEIGHT
                                        , body->position.z }
@@ -363,8 +387,12 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                        , 0
                                        , sin(i) } };
 
-        const RayCollision upWallCollision = GetRayCollisionMesh(headRay, map.meshes[0], map.transform);
-        if (!crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
+        const RayCollision downWallCollision = GetRayCollisionMesh(kneeRay, map.meshes[0], map.transform);
+        if (downWallCollision.hit && downWallCollision.distance < body->size)
+            collidingRay = &downWallCollision;
+
+        const RayCollision upWallCollision   = GetRayCollisionMesh(headRay, map.meshes[0], map.transform);
+        if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
             collidingRay = &upWallCollision;
 
         if (collidingRay != NULL)
@@ -406,7 +434,8 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
             body->position = Vector3Add(body->position, unclip);
         }
 
-        // Checking floor and ceiling collision
+        // Floor and ceiling collision
+        //----------------------------------------------------------------------------------
         //
         //   ()  ^  - ceilingCollision
         //  /|\  |
