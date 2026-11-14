@@ -61,6 +61,9 @@ static Vector2 lean = { 0 };
 static Camera camera = { 0 };
 
 static bool wasGravePressed = false;
+static bool prevFrameCrouchHold = false;
+
+static RenderTexture2D target;
 
 static Texture2D self_idle;
 
@@ -69,8 +72,7 @@ static Model map;
 
 
 static void DrawLevel(void);
-static void UpdateCameraFPS(Camera *camera);
-static bool CheckBodyWallCollision(Body *body);
+static void UpdateCameraFPS(void);
 static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
 
 
@@ -103,7 +105,7 @@ bool LoadGame(void)
         player.position.y + headLerp,
         player.position.z,
     };
-    UpdateCameraFPS(&camera); // Update camera parameters
+    UpdateCameraFPS(); // Update camera parameters
 
     return true;
 }
@@ -216,7 +218,7 @@ void DrawGame(void)
         lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
         lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
 
-        UpdateCameraFPS(&camera);
+        UpdateCameraFPS();
         //----------------------------------------------------------------------------------
 
         // Draw
@@ -242,7 +244,7 @@ void DrawGame(void)
                 DrawText(TextFormat("Player Pos: %03.02f %03.02f", camera.position.x, camera.position.y), 100, 120, 10, PURPLE);
                 DrawText(TextFormat("Player isGrounded: %d", player.isGrounded), 100, 140, 10, PURPLE);
                 DrawText(TextFormat("%02.02f %02.02f %02.02f", player.dir.x, player.dir.y, player.dir.z), 100, 160, 10, PURPLE);
-                DrawText("` TO TURN OFF DEBUG STUFF", 400, 50, 20, RED);
+                DrawText("` TO TURN OFF DEBUG STUFF", 350, 50, 30, RED);
 
                 static const int numberOfDirections = 8;
                 // Using radians instead of degrees
@@ -354,19 +356,16 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
         if (downWallCollision.hit && downWallCollision.distance < body->size)
             collidingRay = &downWallCollision;
 
-        if (!crouchHold)
-        {
-            const Ray headRay = { (Vector3){ body->position.x
-                                           , body->position.y + STAND_HEIGHT
-                                           , body->position.z }
-                                , (Vector3){ cos(i)
-                                           , 0
-                                           , sin(i) } };
+        const Ray headRay = { (Vector3){ body->position.x
+                                       , body->position.y + STAND_HEIGHT
+                                       , body->position.z }
+                            , (Vector3){ cos(i)
+                                       , 0
+                                       , sin(i) } };
 
-            const RayCollision upWallCollision = GetRayCollisionMesh(headRay, map.meshes[0], map.transform);
-            if (upWallCollision.hit && upWallCollision.distance < body->size)
-                collidingRay = &upWallCollision;
-        }
+        const RayCollision upWallCollision = GetRayCollisionMesh(headRay, map.meshes[0], map.transform);
+        if (!crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
+            collidingRay = &upWallCollision;
 
         if (collidingRay != NULL)
         {
@@ -444,14 +443,12 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                 body->isGrounded = true;
                 skipGroundCollisionCheck = true;
             }
-
-            printf("%f %f\n", floorCollision.distance, downWallCollision.distance);
         }
     }
 }
 
 // Update camera for FPS behaviour
-static void UpdateCameraFPS(Camera *camera)
+static void UpdateCameraFPS(void)
 {
     const Vector3 up = (Vector3){ 0.0f, 1.0f, 0.0f };
     const Vector3 targetOffset = (Vector3){ 0.0f, 0.0f, -1.0f };
@@ -482,7 +479,7 @@ static void UpdateCameraFPS(Camera *camera)
     float headSin = sinf(headTimer*PI);
     float headCos = cosf(headTimer*PI);
     const float stepRotation = 0.01f;
-    camera->up = Vector3RotateByAxisAngle(up, pitch, headSin*stepRotation + lean.x);
+    camera.up = Vector3RotateByAxisAngle(up, pitch, headSin*stepRotation + lean.x);
 
     // Camera BOB
     const float bobSide = 0.1f;
@@ -490,8 +487,8 @@ static void UpdateCameraFPS(Camera *camera)
     Vector3 bobbing = Vector3Scale(right, headSin*bobSide);
     bobbing.y = fabsf(headCos*bobUp);
 
-    camera->position = Vector3Add(camera->position, Vector3Scale(bobbing, walkLerp));
-    camera->target = Vector3Add(camera->position, pitch);
+    camera.position = Vector3Add(camera.position, Vector3Scale(bobbing, walkLerp));
+    camera.target = Vector3Add(camera.position, pitch);
 }
 
 // Draw game level
@@ -499,7 +496,7 @@ static void DrawLevel(void)
 {
     rlDisableBackfaceCulling();
     DrawMesh(map.meshes[0], map.materials[0], map.transform);
-    DrawModelWires(map, (Vector3){ 0.0f }, 1.0f, BLACK);
+    DrawModelWires(map, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
     BoundingBox box = GetMeshBoundingBox(map.meshes[2]);
@@ -517,8 +514,6 @@ static void DrawLevel(void)
         // 360 degrees = 2 * PI radians
         // This is because cos() and sin() expect angles in radians
         static const float rayAngleDifference = 2 * PI / (float)numberOfDirections;
-
-        static const Vector2 center = { WINDOW_WIDTH - 100, 100 };
 
         for (float i = 0; i < 2 * PI; i += rayAngleDifference)
         {
