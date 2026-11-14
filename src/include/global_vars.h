@@ -4,6 +4,7 @@
 #include "raylib.h"
 
 
+
 // Defining constants
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 574
@@ -11,6 +12,11 @@
 
 #define GUI_TEXT_SIZE 20
 #define GUI_TEXT_MARGIN 10
+
+
+
+extern bool play;
+extern bool doExit;
 
 
 

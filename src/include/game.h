@@ -5,11 +5,23 @@
 
 
 
+typedef enum {
+    PAUSE
+   ,CONTINUE
+   ,RESTART
+   ,MAIN_MENU
+   ,EXIT_TO_DESKTOP
+} PauseCode;
+
+
+
 bool LoadGame(void);
+
+void UnloadGame(void);
 
 void DrawGame(void);
 
-void UnloadGame(void);
+PauseCode DrawPause(void);
 
 
 

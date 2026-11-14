@@ -12,6 +12,11 @@
 
 
 
+bool play = false;
+bool doExit = false;
+
+
+
 void DrawGameOver(void) {
 
 }
@@ -53,8 +58,9 @@ int main ()
 #else
     SetTargetFPS(FPS);
 
-    while (!WindowShouldClose()) // Detect window close button
+    while (!WindowShouldClose() && !doExit) // Detect window close button
     {
+        // printf("%d\n", GetRandomValue(1, 5));
         DrawMainMenu();
     }
 #endif

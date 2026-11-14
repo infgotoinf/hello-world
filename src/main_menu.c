@@ -31,19 +31,24 @@ void UnloadMainMenu(void) {
 
 
 void DrawMainMenu(void) {
-    static bool play = false;
     static bool prevFramePlay = false;
 
     if (prevFramePlay != play) {
         if (prevFramePlay == false)
+        {
+            LoadGame();
             DisableCursor();
+        }
         else
+        {
             EnableCursor();
+        }
+
+        prevFramePlay = !prevFramePlay;
     }
 
     if (play) {
         DrawGame();
-        prevFramePlay = true;
     }
     else {
         BeginDrawing();

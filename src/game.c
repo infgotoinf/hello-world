@@ -6,11 +6,12 @@
 #include <stdio.h>
 
 #include "raylib.h"
+#include "raygui.h"
 #include "rlgl.h"
 #include "raymath.h"
 
 #include "include/global_vars.h"
-#include "include/pause.h"
+
 
 
 // Used code from:
@@ -80,17 +81,23 @@ static void UpdateBody(Body *body, float rot, char side, char forward, bool jump
 
 bool LoadGame(void)
 {
-    self_idle = LoadTexture("assets/art/sprites/entities/self/idle.png");
-    if (!IsTextureValid(self_idle)) {
-        printf("Couldn't load Texture!\n");
-        return false;
+    static bool firstLoad = true;
+
+    if (firstLoad)
+    {
+        self_idle = LoadTexture("assets/art/sprites/entities/self/idle.png");
+        if (!IsTextureValid(self_idle)) {
+            printf("Couldn't load Texture!\n");
+            return false;
+        }
+        map = LoadModel("assets/maps/map.glb");
+        if (!IsModelValid(map)) {
+            printf("Couldn't load Model!\n");
+            return false;
+        }
+        target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
+        firstLoad = false;
     }
-    map = LoadModel("assets/maps/map.glb");
-    if (!IsModelValid(map)) {
-        printf("Couldn't load Model!\n");
-        return false;
-    }
-    target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
 
     camera.fovy = FOV;
     camera.projection = CAMERA_PERSPECTIVE;
@@ -100,6 +107,8 @@ bool LoadGame(void)
         (box.min.x + box.max.x) * 0.5f,
         (box.min.z + box.max.z) * 0.5f
     };
+    player.velocity = Vector3Zero();
+    player.dir = Vector3Zero();
     player.size = DEFAULT_BODY_SIZE;
     camera.position = (Vector3){
         player.position.x,
@@ -119,6 +128,40 @@ void UnloadGame(void)
 }
 
 
+PauseCode DrawPause(void) {
+    BeginDrawing();
+
+        ClearBackground(RAYWHITE);
+        DrawTexturePro(target.texture, (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
+                (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height }, (Vector2){ 0, 0 }, 0.0f, WHITE);
+        DrawRectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (Color){ 0, 0, 0, 100 });
+
+        static const int BUTTON_WIDTH = 200;
+        static const int BUTTON_HEIGHT = GUI_TEXT_SIZE + GUI_TEXT_MARGIN;
+        static const int BUTTON_MARGIN = GUI_TEXT_MARGIN;
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5 - BUTTON_HEIGHT - BUTTON_MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT }, "continue"))
+        {
+            return CONTINUE;
+        }
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5, BUTTON_WIDTH, BUTTON_HEIGHT }, "restart"))
+        {
+            return RESTART;
+        }
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5 + BUTTON_HEIGHT + BUTTON_MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT }, "main menu"))
+        {
+            return MAIN_MENU;
+        }
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5 + (BUTTON_HEIGHT + BUTTON_MARGIN) * 2, BUTTON_WIDTH, BUTTON_HEIGHT }, "exit to desktop"))
+        {
+            return EXIT_TO_DESKTOP;
+        }
+
+    EndDrawing();
+    return PAUSE;
+}
+
+
+
 void DrawGame(void)
 {
     static bool isPaused = false;
@@ -132,18 +175,6 @@ void DrawGame(void)
         else
         {
             EnableCursor();
-            BeginTextureMode(target);
-                ClearBackground(RAYWHITE);
-                DrawTexturePro(target.texture, (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
-                        (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height }, (Vector2){ 0, 0 }, 0.0f, WHITE);
-
-                DrawRectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (Color){ 0, 0, 0, 100 });
-            EndTextureMode();
-
-            BeginDrawing();
-                DrawTexturePro(target.texture, (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
-                        (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height }, (Vector2){ 0, 0 }, 0.0f, WHITE);
-            EndDrawing();
         }
 
         prevFramePaused = isPaused;
@@ -151,9 +182,6 @@ void DrawGame(void)
 
     if (IsKeyPressed(KEY_ESCAPE))
         isPaused = !isPaused;
-
-    if (IsKeyPressed(KEY_GRAVE))
-        wasGravePressed = !wasGravePressed;
 
     if (isPaused)
     {
@@ -166,15 +194,24 @@ void DrawGame(void)
             isPaused = false;
             break;
         case RESTART:
+            LoadGame();
+            isPaused = false;
             break;
         case MAIN_MENU:
+            play = false;
+            isPaused = false;
             break;
         case EXIT_TO_DESKTOP:
+            doExit = true;
+            isPaused = false;
             break;
         }
     }
     else
     {
+        if (IsKeyPressed(KEY_GRAVE))
+            wasGravePressed = !wasGravePressed;
+
         static Vector3 cameraPosAdd = { 0 };
         if (IsKeyDown(KEY_DOWN))
         {
@@ -272,6 +309,7 @@ void DrawGame(void)
         EndDrawing();
     }
 }
+
 
 //----------------------------------------------------------------------------------
 // Module Functions Definition
@@ -476,6 +514,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     }
 }
 
+
 // Update camera for FPS behaviour
 static void UpdateCameraFPS(void)
 {
@@ -519,6 +558,7 @@ static void UpdateCameraFPS(void)
     camera.position = Vector3Add(camera.position, Vector3Scale(bobbing, walkLerp));
     camera.target = Vector3Add(camera.position, pitch);
 }
+
 
 // Draw game level
 static void DrawLevel(void)
