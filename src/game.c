@@ -42,28 +42,51 @@
 
 
 
-// Body structure
 typedef struct {
     Vector3 position;
     Vector3 velocity;
     Vector3 dir;
     float size;
+    int hp;
     bool isGrounded;
 } Body;
+
+typedef struct {
+    Body body;
+    Camera camera;
+} Player;
+
+typedef enum {
+    MEELE
+   ,GUN
+} EnemyType;
+
+typedef enum {
+    WANDERING
+   ,CHASING
+   ,FIGHTING
+   ,DEAD
+} EnemyStatus;
+
+typedef struct {
+    Body body;
+    EnemyType type;
+    EnemyStatus status;
+    void *data;
+} Enemy;
 
 
 
 static Vector2 sensitivity = { 0.001f, 0.001f };
 
-static Body player = { 0 };
+static Player player = { 0 };
 static Vector2 lookRotation = { 0 };
 static float headTimer = 0.0f;
 static float walkLerp = 0.0f;
 static float headLerp = STAND_HEIGHT;
 static Vector2 lean = { 0 };
-static Camera camera = { 0 };
 
-static bool wasGravePressed = false;
+static bool debugMode = true;
 static bool prevFrameCrouchHold = false;
 
 static RenderTexture2D target;
@@ -74,9 +97,9 @@ static Model map;
 
 
 
-static void DrawLevel(void);
-static void UpdateCameraFPS(void);
-static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
+static void DrawLevel(Camera camera);
+static void UpdateCameraFPS(Camera *camera);
+static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
 
 
 
@@ -96,27 +119,42 @@ bool LoadGame(void)
             printf("Couldn't load Model!\n");
             return false;
         }
+
+        if (debugMode)
+        {
+            printf("%d %d\n\n", map.materialCount, map.meshCount);
+
+            for (int i = 0; i < map.materialCount; ++i)
+            {
+                printf("%d ", map.materials[i].maps[0].color.r);
+                printf("%d ", map.materials[i].maps[0].color.g);
+                printf("%d ", map.materials[i].maps[0].color.b);
+
+                printf("\n");
+            }
+        }
+
         target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
         firstLoad = false;
     }
 
-    camera.fovy = FOV;
-    camera.projection = CAMERA_PERSPECTIVE;
+    player.camera.fovy = FOV;
+    player.camera.projection = CAMERA_PERSPECTIVE;
     BoundingBox box = GetMeshBoundingBox(map.meshes[1]);
-    player.position = (Vector3){
+    player.body.position = (Vector3){
         (box.min.x + box.max.x) * 0.5f,
         (box.min.x + box.max.x) * 0.5f,
         (box.min.z + box.max.z) * 0.5f
     };
-    player.velocity = Vector3Zero();
-    player.dir = Vector3Zero();
-    player.size = DEFAULT_BODY_SIZE;
-    camera.position = (Vector3){
-        player.position.x,
-        player.position.y + headLerp,
-        player.position.z,
+    player.body.velocity = Vector3Zero();
+    player.body.dir = Vector3Zero();
+    player.body.size = DEFAULT_BODY_SIZE;
+    player.camera.position = (Vector3){
+        player.body.position.x,
+        player.body.position.y + headLerp,
+        player.body.position.z,
     };
-    UpdateCameraFPS(); // Update camera parameters
+    UpdateCameraFPS(&player.camera);
 
     return true;
 }
@@ -140,19 +178,27 @@ PauseCode DrawPause(void) {
         static const int BUTTON_WIDTH = 200;
         static const int BUTTON_HEIGHT = GUI_TEXT_SIZE + GUI_TEXT_MARGIN;
         static const int BUTTON_MARGIN = GUI_TEXT_MARGIN;
-        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5 - BUTTON_HEIGHT - BUTTON_MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT }, "continue"))
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
+                                 , WINDOW_HEIGHT * 0.5 - BUTTON_HEIGHT - BUTTON_MARGIN
+                                 , BUTTON_WIDTH, BUTTON_HEIGHT }, "continue"))
         {
             return CONTINUE;
         }
-        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5, BUTTON_WIDTH, BUTTON_HEIGHT }, "restart"))
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
+                                 , WINDOW_HEIGHT * 0.5
+                                 , BUTTON_WIDTH, BUTTON_HEIGHT }, "restart"))
         {
             return RESTART;
         }
-        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5 + BUTTON_HEIGHT + BUTTON_MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT }, "main menu"))
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
+                                 , WINDOW_HEIGHT * 0.5 + BUTTON_HEIGHT + BUTTON_MARGIN
+                                 , BUTTON_WIDTH, BUTTON_HEIGHT }, "main menu"))
         {
             return MAIN_MENU;
         }
-        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5, WINDOW_HEIGHT * 0.5 + (BUTTON_HEIGHT + BUTTON_MARGIN) * 2, BUTTON_WIDTH, BUTTON_HEIGHT }, "exit to desktop"))
+        if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
+                                 , WINDOW_HEIGHT * 0.5 + (BUTTON_HEIGHT + BUTTON_MARGIN) * 2
+                                 , BUTTON_WIDTH, BUTTON_HEIGHT }, "exit to desktop"))
         {
             return EXIT_TO_DESKTOP;
         }
@@ -211,7 +257,7 @@ void DrawGame(void)
     else
     {
         if (IsKeyPressed(KEY_GRAVE))
-            wasGravePressed = !wasGravePressed;
+            debugMode = !debugMode;
 
         static Vector3 cameraPosAdd = { 0 };
         if (IsKeyDown(KEY_DOWN))
@@ -232,33 +278,33 @@ void DrawGame(void)
         char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
         char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
         bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
-        UpdateBody(&player, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), &crouching);
+        UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), &crouching);
         prevFrameCrouchHold = crouching;
 
         float delta = GetFrameTime();
         headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
-        camera.position = (Vector3){
-            player.position.x + cameraPosAdd.x,
-            player.position.y + headLerp,
-            player.position.z,
+        player.camera.position = (Vector3){
+            player.body.position.x + cameraPosAdd.x,
+            player.body.position.y + headLerp,
+            player.body.position.z,
         };
 
-        if (player.isGrounded && ((forward != 0) || (sideway != 0)))
+        if (player.body.isGrounded && ((forward != 0) || (sideway != 0)))
         {
             headTimer += delta*3.0f;
             walkLerp = Lerp(walkLerp, 1.0f, 10.0f*delta);
-            camera.fovy = Lerp(camera.fovy, FOV - 5.0f, 5.0f*delta);
+            player.camera.fovy = Lerp(player.camera.fovy, FOV - 5.0f, 5.0f*delta);
         }
         else
         {
             walkLerp = Lerp(walkLerp, 0.0f, 10.0f*delta);
-            camera.fovy = Lerp(camera.fovy, FOV, 5.0f*delta);
+            player.camera.fovy = Lerp(player.camera.fovy, FOV, 5.0f*delta);
         }
 
         lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
         lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
 
-        UpdateCameraFPS();
+        UpdateCameraFPS(&player.camera);
         //----------------------------------------------------------------------------------
 
         // Draw
@@ -266,12 +312,12 @@ void DrawGame(void)
         BeginTextureMode(target);
             ClearBackground(RAYWHITE);
 
-            BeginMode3D(camera);
-                DrawLevel();
+            BeginMode3D(player.camera);
+                DrawLevel(player.camera);
             EndMode3D();
 
             // Draw info box
-            if (!wasGravePressed)
+            if (debugMode)
             {
                 DrawRectangle(5, 5, 330, 75, Fade(SKYBLUE, 0.5f));
                 DrawRectangleLines(5, 5, 330, 75, BLUE);
@@ -279,11 +325,11 @@ void DrawGame(void)
                 DrawText("Camera controls:", 15, 15, 10, BLACK);
                 DrawText("- Move keys: W, A, S, D, Space, Left-Ctrl", 15, 30, 10, BLACK);
                 DrawText("- Look around: mouse", 15, 45, 10, BLACK);
-                DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.velocity.x, player.velocity.z })), 15, 60, 10, BLACK);
+                DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.body.velocity.x, player.body.velocity.z })), 15, 60, 10, BLACK);
                 DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 100, 100, 10, PURPLE);
-                DrawText(TextFormat("Player Pos: %03.02f %03.02f", camera.position.x, camera.position.y), 100, 120, 10, PURPLE);
-                DrawText(TextFormat("Player isGrounded: %d", player.isGrounded), 100, 140, 10, PURPLE);
-                DrawText(TextFormat("%02.02f %02.02f %02.02f", player.dir.x, player.dir.y, player.dir.z), 100, 160, 10, PURPLE);
+                DrawText(TextFormat("Player Pos: %03.02f %03.02f", player.camera.position.x, player.camera.position.y), 100, 120, 10, PURPLE);
+                DrawText(TextFormat("Player isGrounded: %d", player.body.isGrounded), 100, 140, 10, PURPLE);
+                DrawText(TextFormat("%02.02f %02.02f %02.02f", player.body.dir.x, player.body.dir.y, player.body.dir.z), 100, 160, 10, PURPLE);
                 DrawText("` TO TURN OFF DEBUG STUFF", 350, 50, 30, RED);
 
                 static const int numberOfDirections = 8;
@@ -517,7 +563,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 
 
 // Update camera for FPS behaviour
-static void UpdateCameraFPS(void)
+static void UpdateCameraFPS(Camera *camera)
 {
     const Vector3 up = (Vector3){ 0.0f, 1.0f, 0.0f };
     const Vector3 targetOffset = (Vector3){ 0.0f, 0.0f, -1.0f };
@@ -548,7 +594,7 @@ static void UpdateCameraFPS(void)
     float headSin = sinf(headTimer*PI);
     float headCos = cosf(headTimer*PI);
     const float stepRotation = 0.01f;
-    camera.up = Vector3RotateByAxisAngle(up, pitch, headSin*stepRotation + lean.x);
+    camera->up = Vector3RotateByAxisAngle(up, pitch, headSin*stepRotation + lean.x);
 
     // Camera BOB
     const float bobSide = 0.1f;
@@ -556,16 +602,22 @@ static void UpdateCameraFPS(void)
     Vector3 bobbing = Vector3Scale(right, headSin*bobSide);
     bobbing.y = fabsf(headCos*bobUp);
 
-    camera.position = Vector3Add(camera.position, Vector3Scale(bobbing, walkLerp));
-    camera.target = Vector3Add(camera.position, pitch);
+    camera->position = Vector3Add(camera->position, Vector3Scale(bobbing, walkLerp));
+    camera->target = Vector3Add(camera->position, pitch);
 }
 
 
 // Draw game level
-static void DrawLevel(void)
+static void DrawLevel(Camera camera)
 {
     rlDisableBackfaceCulling();
-    DrawMesh(map.meshes[0], map.materials[0], map.transform);
+    // DrawMesh(map.meshes[0], map.materials[1], map.transform);
+    // DrawModel(map, Vector3Zero(), 1.0f, WHITE);
+
+    static int a = 0;
+    if (IsKeyPressed(KEY_Q)) ++a;
+    DrawMesh(map.meshes[a], map.materials[0], map.transform);
+
     DrawModelWires(map, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
@@ -575,9 +627,9 @@ static void DrawLevel(void)
                                          (box.min.x + box.max.x) * 0.5f,
                                          (box.min.y + box.max.y) * 0.5f,
                                          (box.min.z + box.max.z) * 0.5f
-                                     }, 3, WHITE);
+                                     }, 2.2f, WHITE);
 
-    if (!wasGravePressed)
+    if (debugMode)
     {
         static const int numberOfDirections = 8;
         // Using radians instead of degrees
@@ -597,26 +649,27 @@ static void DrawLevel(void)
             //                      , sin(i) * player.size } };
             // DrawRay(ray, BLUE);
 
-            const Vector3 kneeVector = { player.position.x + cos(i) * player.size
-                                       , player.position.y + CROUCH_HEIGHT
-                                       , player.position.z + sin(i) * player.size };
+            const Vector3 kneeVector = { player.body.position.x + cos(i) * player.body.size
+                                       , player.body.position.y + CROUCH_HEIGHT
+                                       , player.body.position.z + sin(i) * player.body.size };
 
-            const Vector3 headVector = { player.position.x + cos(i) * player.size
-                                       , player.position.y + STAND_HEIGHT
-                                       , player.position.z + sin(i) * player.size };
+            const Vector3 headVector = { player.body.position.x + cos(i) * player.body.size
+                                       , player.body.position.y + STAND_HEIGHT
+                                       , player.body.position.z + sin(i) * player.body.size };
 
             DrawSphere(kneeVector, 0.01f, BLACK);
             DrawSphere(headVector, 0.01f, BLACK);
         }
 
-        DrawRay((Ray){ (Vector3){ player.position.x
-                                , player.position.y + CROUCH_HEIGHT
-                                , player.position.z }
-                     , player.dir }, ORANGE);
+        DrawRay((Ray){ (Vector3){ player.body.position.x
+                                , player.body.position.y + CROUCH_HEIGHT
+                                , player.body.position.z }
+                     , player.body.dir }, ORANGE);
 
-        DrawRay((Ray){ (Vector3){ player.position.x
-                                , player.position.y + CROUCH_HEIGHT
-                                , player.position.z }
-                     , player.velocity }, YELLOW);
+        DrawRay((Ray){ (Vector3){ player.body.position.x
+                                , player.body.position.y + CROUCH_HEIGHT
+                                , player.body.position.z }
+                     , player.body.velocity }, YELLOW);
+
     }
 }

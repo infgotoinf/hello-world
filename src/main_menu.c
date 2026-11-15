@@ -61,7 +61,7 @@ void DrawMainMenu(void) {
             // Draw raygui button
             static const int BUTTON_WIDTH = 200;
             if (GuiButton((Rectangle){ logo_pos.x + logo.width * 0.5 - BUTTON_WIDTH * 0.5
-                                     , logo_pos.y + logo.height + 100
+                                     , logo_pos.y + logo.height + 250
                                      , BUTTON_WIDTH
                                      , GUI_TEXT_SIZE + GUI_TEXT_MARGIN }, "Play"))
             {
