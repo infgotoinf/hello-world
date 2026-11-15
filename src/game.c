@@ -40,6 +40,9 @@
 
 #define NORMALIZE_INPUT  0
 
+#define MAX_ENEMY_COUNT    50
+#define MAX_MAP_MESH_COUNT 50
+
 
 
 typedef struct {
@@ -51,10 +54,12 @@ typedef struct {
     bool isGrounded;
 } Body;
 
+
 typedef struct {
     Body body;
     Camera camera;
 } Player;
+
 
 typedef enum {
     MEELE
@@ -75,6 +80,17 @@ typedef struct {
     void *data;
 } Enemy;
 
+typedef struct {
+    Enemy *enemy;
+    int enemyCount;
+} Enemies;
+
+
+typedef struct {
+    Mesh *meshes;
+    int meshCount;
+} Map;
+
 
 
 static Vector2 sensitivity = { 0.001f, 0.001f };
@@ -89,17 +105,27 @@ static Vector2 lean = { 0 };
 static bool debugMode = true;
 static bool prevFrameCrouchHold = false;
 
+static Enemies enemies;
+static Map map;
+static BoundingBox finish;
 static RenderTexture2D target;
 
 static Texture2D self_idle;
 
-static Model map;
+static Model level;
 
 
 
 static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
 static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
+
+
+
+static Vector3 CenterMeshPos(Mesh mesh) {
+    BoundingBox box = GetMeshBoundingBox(mesh);
+    return (Vector3){ (box.min.x + box.max.x) * 0.5f, (box.min.y + box.max.y) * 0.5f, (box.min.z + box.max.z) * 0.5f };
+}
 
 
 
@@ -114,46 +140,94 @@ bool LoadGame(void)
             printf("Couldn't load Texture!\n");
             return false;
         }
-        map = LoadModel("assets/maps/map.glb");
-        if (!IsModelValid(map)) {
+        level = LoadModel("assets/maps/map.glb");
+        if (!IsModelValid(level)) {
             printf("Couldn't load Model!\n");
             return false;
         }
 
-        if (debugMode)
-        {
-            printf("%d %d\n\n", map.materialCount, map.meshCount);
-
-            for (int i = 0; i < map.materialCount; ++i)
-            {
-                printf("%d ", map.materials[i].maps[0].color.r);
-                printf("%d ", map.materials[i].maps[0].color.g);
-                printf("%d ", map.materials[i].maps[0].color.b);
-
-                printf("\n");
-            }
-        }
-
         target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
         firstLoad = false;
+
+        enemies.enemy = MemAlloc(sizeof(Enemy) * MAX_ENEMY_COUNT);
+        map.meshes    = MemAlloc(sizeof(Mesh)  * MAX_MAP_MESH_COUNT);
     }
+
+
+    // Parsing meshes, determening their type, creating map and enemies
+    //----------------------------------------------------------------------------------
+    if (debugMode)
+    {
+        printf("%d %d\n\n", level.materialCount, level.meshCount);
+        for (int i = 0; i < level.materialCount; ++i)
+        {
+            printf("%d ", level.materials[i].maps[0].color.r);
+            printf("%d ", level.materials[i].maps[0].color.g);
+            printf("%d ", level.materials[i].maps[0].color.b);
+
+            printf("\n");
+        }
+    }
+
+    const Color spawnColor      = {   0,   0, 255, 255 };
+    const Color finishColor     = {   0, 255,   0, 255 };
+    const Color meeleEnemyColor = { 255,   0,   0, 255 };
+    const Color gunEnemyColor   = { 255,   0,  54, 255 };
+
+    Vector3 spawnPos;
+    int enemyCounter = 0;
+    int mapCounter = 0;
+    for (int i = 0; i < level.meshCount; ++i)
+    {
+        int meshMaterialIdx = level.meshMaterial[i];
+        Color meshMaterialColor = level.materials[meshMaterialIdx].maps[0].color;
+
+        if      (ColorIsEqual(meeleEnemyColor, spawnColor)) spawnPos = CenterMeshPos(level.meshes[i]);
+        else if (ColorIsEqual(meeleEnemyColor, finishColor)) finish  = GetMeshBoundingBox(level.meshes[i]);
+        else if (ColorIsEqual(meeleEnemyColor, meeleEnemyColor))
+        {
+            enemies.enemy[enemyCounter].type = MEELE;
+            enemies.enemy[enemyCounter++].status = WANDERING;
+
+            Body body = {
+                .position = CenterMeshPos(level.meshes[i]),
+                .velocity = Vector3Zero(), .dir = Vector3Zero(), .isGrounded = true,
+
+                .size = DEFAULT_BODY_SIZE,
+                .hp = 100
+            };
+        }
+        else if (ColorIsEqual(meeleEnemyColor, gunEnemyColor))
+        {
+            enemies.enemy[enemyCounter].type = GUN;
+            enemies.enemy[enemyCounter++].status = WANDERING;
+
+            Body body = {
+                .position = CenterMeshPos(level.meshes[i]),
+                .velocity = Vector3Zero(), .dir = Vector3Zero(), .isGrounded = true,
+
+                .size = DEFAULT_BODY_SIZE,
+                .hp = 100
+            };
+        }
+        else map.meshes[mapCounter++] = level.meshes[i];
+    }
+
+    enemies.enemyCount = enemyCounter;
+
+    Body playerBody = {
+        .position = spawnPos,
+        .velocity = Vector3Zero(), .dir = Vector3Zero(),
+
+        .size = DEFAULT_BODY_SIZE,
+        .hp = 100
+    };
+    player.body = playerBody;
 
     player.camera.fovy = FOV;
     player.camera.projection = CAMERA_PERSPECTIVE;
-    BoundingBox box = GetMeshBoundingBox(map.meshes[1]);
-    player.body.position = (Vector3){
-        (box.min.x + box.max.x) * 0.5f,
-        (box.min.x + box.max.x) * 0.5f,
-        (box.min.z + box.max.z) * 0.5f
-    };
-    player.body.velocity = Vector3Zero();
-    player.body.dir = Vector3Zero();
-    player.body.size = DEFAULT_BODY_SIZE;
-    player.camera.position = (Vector3){
-        player.body.position.x,
-        player.body.position.y + headLerp,
-        player.body.position.z,
-    };
+    player.camera.position = player.body.position;
+
     UpdateCameraFPS(&player.camera);
 
     return true;
@@ -163,7 +237,7 @@ bool LoadGame(void)
 void UnloadGame(void)
 {
     UnloadTexture(self_idle);
-    UnloadModel(map);
+    UnloadModel(level);
 }
 
 
@@ -389,7 +463,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                              , STAND_HEIGHT - CROUCH_HEIGHT
                                              , 0 } };
             const RayCollision crouchCeilingCollision =
-                    GetRayCollisionMesh(heightRay, map.meshes[0], map.transform);
+                    GetRayCollisionMesh(heightRay, level.meshes[0], level.transform);
 
 
             if (crouchCeilingCollision.hit && crouchCeilingCollision.distance < STAND_HEIGHT - CROUCH_HEIGHT)
@@ -472,11 +546,11 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                        , 0
                                        , sin(i) } };
 
-        const RayCollision downWallCollision = GetRayCollisionMesh(kneeRay, map.meshes[0], map.transform);
+        const RayCollision downWallCollision = GetRayCollisionMesh(kneeRay, level.meshes[0], level.transform);
         if (downWallCollision.hit && downWallCollision.distance < body->size)
             collidingRay = &downWallCollision;
 
-        const RayCollision upWallCollision   = GetRayCollisionMesh(headRay, map.meshes[0], map.transform);
+        const RayCollision upWallCollision   = GetRayCollisionMesh(headRay, level.meshes[0], level.transform);
         if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
             collidingRay = &upWallCollision;
 
@@ -540,10 +614,10 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                                , body->position.z + sin(i)*(body->size - 0.001f) }
                                     , (Vector3){ 0, 1000, 0 } };
 
-            const RayCollision floorCollision   = GetRayCollisionMesh(downwardRay, map.meshes[0]
-                                                                                 , map.transform);
-            const RayCollision ceilingCollision = GetRayCollisionMesh(upwardRay  , map.meshes[0]
-                                                                                 , map.transform);
+            const RayCollision floorCollision   = GetRayCollisionMesh(downwardRay, level.meshes[0]
+                                                                                 , level.transform);
+            const RayCollision ceilingCollision = GetRayCollisionMesh(upwardRay  , level.meshes[0]
+                                                                                 , level.transform);
 
             if (ceilingCollision.hit && ceilingCollision.distance <= 0.001)
             {
@@ -611,17 +685,17 @@ static void UpdateCameraFPS(Camera *camera)
 static void DrawLevel(Camera camera)
 {
     rlDisableBackfaceCulling();
-    // DrawMesh(map.meshes[0], map.materials[1], map.transform);
-    // DrawModel(map, Vector3Zero(), 1.0f, WHITE);
+    // DrawMesh(level.meshes[0], level.materials[1], level.transform);
+    // DrawModel(level, Vector3Zero(), 1.0f, WHITE);
 
     static int a = 0;
     if (IsKeyPressed(KEY_Q)) ++a;
-    DrawMesh(map.meshes[a], map.materials[0], map.transform);
+    DrawMesh(level.meshes[a], level.materials[0], level.transform);
 
-    DrawModelWires(map, Vector3Zero(), 1.0f, BLACK);
+    DrawModelWires(level, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
-    BoundingBox box = GetMeshBoundingBox(map.meshes[2]);
+    BoundingBox box = GetMeshBoundingBox(level.meshes[2]);
 
     DrawBillboard(camera, self_idle, (Vector3){
                                          (box.min.x + box.max.x) * 0.5f,
