@@ -88,6 +88,7 @@ typedef struct {
 
 typedef struct {
     Mesh *meshes;
+    int *materialIdxes;
     int meshCount;
 } Map;
 
@@ -149,8 +150,9 @@ bool LoadGame(void)
         target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
         firstLoad = false;
 
-        enemies.enemy = MemAlloc(sizeof(Enemy) * MAX_ENEMY_COUNT);
-        map.meshes    = MemAlloc(sizeof(Mesh)  * MAX_MAP_MESH_COUNT);
+        enemies.enemy     = MemAlloc(sizeof(Enemy) * MAX_ENEMY_COUNT);
+        map.meshes        = MemAlloc(sizeof(Mesh)  * MAX_MAP_MESH_COUNT);
+        map.materialIdxes = MemAlloc(sizeof(int)   * MAX_MAP_MESH_COUNT);
     }
 
 
@@ -179,15 +181,15 @@ bool LoadGame(void)
     int mapCounter = 0;
     for (int i = 0; i < level.meshCount; ++i)
     {
-        int meshMaterialIdx = level.meshMaterial[i];
-        Color meshMaterialColor = level.materials[meshMaterialIdx].maps[0].color;
+        int materialIdxes = level.meshMaterial[i];
+        Color meshMaterialColor = level.materials[materialIdxes].maps[0].color;
 
-        if      (ColorIsEqual(meeleEnemyColor, spawnColor)) spawnPos = CenterMeshPos(level.meshes[i]);
-        else if (ColorIsEqual(meeleEnemyColor, finishColor)) finish  = GetMeshBoundingBox(level.meshes[i]);
-        else if (ColorIsEqual(meeleEnemyColor, meeleEnemyColor))
+        if      (ColorIsEqual(meshMaterialColor, spawnColor)) spawnPos = CenterMeshPos(level.meshes[i]);
+        else if (ColorIsEqual(meshMaterialColor, finishColor)) finish  = GetMeshBoundingBox(level.meshes[i]);
+        else if (ColorIsEqual(meshMaterialColor, meeleEnemyColor))
         {
             enemies.enemy[enemyCounter].type = MEELE;
-            enemies.enemy[enemyCounter++].status = WANDERING;
+            enemies.enemy[enemyCounter].status = WANDERING;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
@@ -196,11 +198,12 @@ bool LoadGame(void)
                 .size = DEFAULT_BODY_SIZE,
                 .hp = 100
             };
+            enemies.enemy[enemyCounter++].body = body;
         }
         else if (ColorIsEqual(meeleEnemyColor, gunEnemyColor))
         {
             enemies.enemy[enemyCounter].type = GUN;
-            enemies.enemy[enemyCounter++].status = WANDERING;
+            enemies.enemy[enemyCounter].status = WANDERING;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
@@ -209,11 +212,17 @@ bool LoadGame(void)
                 .size = DEFAULT_BODY_SIZE,
                 .hp = 100
             };
+            enemies.enemy[enemyCounter++].body = body;
         }
-        else map.meshes[mapCounter++] = level.meshes[i];
+        else
+        {
+            map.materialIdxes[mapCounter] = materialIdxes;
+            map.meshes[mapCounter++] = level.meshes[i];
+        }
     }
 
     enemies.enemyCount = enemyCounter;
+    map.meshCount = mapCounter;
 
     Body playerBody = {
         .position = spawnPos,
@@ -462,17 +471,22 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                   , (Vector3){ 0
                                              , STAND_HEIGHT - CROUCH_HEIGHT
                                              , 0 } };
-            const RayCollision crouchCeilingCollision =
-                    GetRayCollisionMesh(heightRay, level.meshes[0], level.transform);
 
-
-            if (crouchCeilingCollision.hit && crouchCeilingCollision.distance < STAND_HEIGHT - CROUCH_HEIGHT)
+            for (int j = 0; j < map.meshCount; ++j)
             {
-                *crouchHold = true;
-                break;
+                const RayCollision crouchCeilingCollision =
+                        GetRayCollisionMesh(heightRay, map.meshes[j], level.transform);
+
+                if (crouchCeilingCollision.hit && crouchCeilingCollision.distance < STAND_HEIGHT - CROUCH_HEIGHT)
+                {
+                    *crouchHold = true;
+                    goto CroutchCheckEnd;
+                }
             }
         }
     }
+
+CroutchCheckEnd: ;
 
     float delta = GetFrameTime();
 
@@ -546,51 +560,55 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                        , 0
                                        , sin(i) } };
 
-        const RayCollision downWallCollision = GetRayCollisionMesh(kneeRay, level.meshes[0], level.transform);
-        if (downWallCollision.hit && downWallCollision.distance < body->size)
-            collidingRay = &downWallCollision;
-
-        const RayCollision upWallCollision   = GetRayCollisionMesh(headRay, level.meshes[0], level.transform);
-        if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
-            collidingRay = &upWallCollision;
-
-        if (collidingRay != NULL)
+        for (int j = 0; j < map.meshCount; ++j)
         {
-            // How much body clipped
-            float clip = body->size - collidingRay->distance;
+            const RayCollision downWallCollision = GetRayCollisionMesh(kneeRay, map.meshes[j], level.transform);
+            if (downWallCollision.hit && downWallCollision.distance < body->size)
+                collidingRay = &downWallCollision;
 
-            // We reverse clip, if dot product of body.velocity and wallCollision.normal is positive (if
-            // body.vector and wallCollision.normal look in the same direction):
-            //
-            //     wallCollision.normal . wallCollision.velocity
-            //
-            // More about dot product: https://gamemath.com/book/vectors.html#dot_product_math
-            //
-            // We do this, so we don't clip through a wall with a reversed orientation and since we
-            // have plane walls and planes have only one orientation, we need this, otherwise:
-            // - The side of the wall with our orientation will have a nice collision
-            // - And the other one will teleport us to the first side
-            //
-            // wallCollision.normal when hitting right and wrong wall orientation:
-            //
-            //                                  >
-            //                                /
-            //                              /
-            //      xxxxxxxxx       ---------
-            //      ---------       xxxx/xxxx
-            //         / \            /
-            //       /    \         /
-            //     /       >      /
-            //
-            if (collidingRay->normal.x * body->velocity.x
-              + collidingRay->normal.z * body->velocity.z > 0) clip *= -1;
+            const RayCollision upWallCollision   = GetRayCollisionMesh(headRay, map.meshes[j], level.transform);
+            if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
+                collidingRay = &upWallCollision;
 
-            // Vector to add to unclip the body
-            const Vector3 unclip = { collidingRay->normal.x * clip
-                                   , 0
-                                   , collidingRay->normal.z * clip };
+            if (collidingRay != NULL)
+            {
+                // How much body clipped
+                float clip = body->size - collidingRay->distance;
 
-            body->position = Vector3Add(body->position, unclip);
+                // We reverse clip, if dot product of body.velocity and wallCollision.normal is positive (if
+                // body.vector and wallCollision.normal look in the same direction):
+                //
+                //     wallCollision.normal . wallCollision.velocity
+                //
+                // More about dot product: https://gamemath.com/book/vectors.html#dot_product_math
+                //
+                // We do this, so we don't clip through a wall with a reversed orientation and since we
+                // have plane walls and planes have only one orientation, we need this, otherwise:
+                // - The side of the wall with our orientation will have a nice collision
+                // - And the other one will teleport us to the first side
+                //
+                // wallCollision.normal when hitting right and wrong wall orientation:
+                //
+                //                                  >
+                //                                /
+                //                              /
+                //      xxxxxxxxx       ---------
+                //      ---------       xxxx/xxxx
+                //         / \            /
+                //       /    \         /
+                //     /       >      /
+                //
+                if (collidingRay->normal.x * body->velocity.x
+                  + collidingRay->normal.z * body->velocity.z > 0) clip *= -1;
+
+                // Vector to add to unclip the body
+                const Vector3 unclip = { collidingRay->normal.x * clip
+                                       , 0
+                                       , collidingRay->normal.z * clip };
+
+                body->position = Vector3Add(body->position, unclip);
+                collidingRay = NULL;
+            }
         }
 
         // Floor and ceiling collision
@@ -614,19 +632,29 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                                                , body->position.z + sin(i)*(body->size - 0.001f) }
                                     , (Vector3){ 0, 1000, 0 } };
 
-            const RayCollision floorCollision   = GetRayCollisionMesh(downwardRay, level.meshes[0]
-                                                                                 , level.transform);
-            const RayCollision ceilingCollision = GetRayCollisionMesh(upwardRay  , level.meshes[0]
-                                                                                 , level.transform);
+            RayCollision closestFloorCollision = { .distance = 10000 };
+            RayCollision closestCeilingCollision = { .distance = 10000 };
 
-            if (ceilingCollision.hit && ceilingCollision.distance <= 0.001)
+            for (int j = 0; j < map.meshCount; ++j)
             {
-                body->position.y = ceilingCollision.point.y;
+                const RayCollision floorCollision   = GetRayCollisionMesh(downwardRay, map.meshes[j], level.transform);
+                const RayCollision ceilingCollision = GetRayCollisionMesh(upwardRay  , map.meshes[j], level.transform);
+
+                if (floorCollision.hit && floorCollision.distance < closestFloorCollision.distance)
+                    closestFloorCollision = floorCollision;
+
+                if (ceilingCollision.hit && ceilingCollision.distance < closestCeilingCollision.distance)
+                    closestCeilingCollision = ceilingCollision;
+            }
+
+            if (closestCeilingCollision.hit && closestCeilingCollision.distance <= 0.001)
+            {
+                body->position.y = closestCeilingCollision.point.y;
                 body->velocity.y = 0.0f;
                 body->isGrounded = true;
                 skipGroundCollisionCheck = true;
             }
-            else if (floorCollision.hit && floorCollision.distance * 1000 >= 0.01) body->isGrounded = false;
+            else if (closestFloorCollision.hit && closestFloorCollision.distance * 1000 >= 0.01) body->isGrounded = false;
             else {
                 body->isGrounded = true;
                 skipGroundCollisionCheck = true;
@@ -688,9 +716,14 @@ static void DrawLevel(Camera camera)
     // DrawMesh(level.meshes[0], level.materials[1], level.transform);
     // DrawModel(level, Vector3Zero(), 1.0f, WHITE);
 
-    static int a = 0;
-    if (IsKeyPressed(KEY_Q)) ++a;
-    DrawMesh(level.meshes[a], level.materials[0], level.transform);
+    // static int a = 0;
+    // if (IsKeyPressed(KEY_Q)) ++a;
+    // DrawMesh(level.meshes[a], level.materials[0], level.transform);
+    for (int i = 0; i < map.meshCount; ++i)
+    {
+        const Mesh currentMesh = map.meshes[i];
+        DrawMesh(currentMesh, level.materials[map.materialIdxes[i]], level.transform);
+    }
 
     DrawModelWires(level, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
