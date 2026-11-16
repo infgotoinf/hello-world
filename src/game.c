@@ -32,8 +32,10 @@
 #define AIR_DRAG        0.98f
 // Responsiveness for turning movement direction to looked direction
 #define CONTROL         15.0f
-#define CROUCH_HEIGHT    0.5f
-#define STAND_HEIGHT     1.5f
+#define CROUCH_HEIGHT    0.7f
+#define STAND_HEIGHT    1.95f
+#define CAMERA_CROUCH_HEIGHT  0.5f
+#define CAMERA_HEIGHT        1.75f
 #define FOV             80.0f
 
 #define DEFAULT_BODY_SIZE 0.25f
@@ -117,6 +119,7 @@ static Model level;
 
 
 
+
 static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
 static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
@@ -166,6 +169,7 @@ bool LoadGame(void)
             printf("%d ", level.materials[i].maps[0].color.r);
             printf("%d ", level.materials[i].maps[0].color.g);
             printf("%d ", level.materials[i].maps[0].color.b);
+            printf("%d ", level.materials[i].maps[0].color.a);
 
             printf("\n");
         }
@@ -174,7 +178,7 @@ bool LoadGame(void)
     const Color spawnColor      = {   0,   0, 255, 255 };
     const Color finishColor     = {   0, 255,   0, 255 };
     const Color meeleEnemyColor = { 255,   0,   0, 255 };
-    const Color gunEnemyColor   = { 255,   0,  54, 255 };
+    const Color gunEnemyColor   = { 255,   0, 126, 255 };
 
     Vector3 spawnPos;
     int enemyCounter = 0;
@@ -200,7 +204,7 @@ bool LoadGame(void)
             };
             enemies.enemy[enemyCounter++].body = body;
         }
-        else if (ColorIsEqual(meeleEnemyColor, gunEnemyColor))
+        else if (ColorIsEqual(meshMaterialColor, gunEnemyColor))
         {
             enemies.enemy[enemyCounter].type = GUN;
             enemies.enemy[enemyCounter].status = WANDERING;
@@ -235,7 +239,11 @@ bool LoadGame(void)
 
     player.camera.fovy = FOV;
     player.camera.projection = CAMERA_PERSPECTIVE;
-    player.camera.position = player.body.position;
+    player.camera.position = (Vector3) {
+        player.body.position.x
+       ,CAMERA_HEIGHT
+       ,player.body.position.z
+    };
 
     UpdateCameraFPS(&player.camera);
 
@@ -365,7 +373,7 @@ void DrawGame(void)
         prevFrameCrouchHold = crouching;
 
         float delta = GetFrameTime();
-        headLerp = Lerp(headLerp, (crouching ? CROUCH_HEIGHT : STAND_HEIGHT), 20.0f*delta);
+        headLerp = Lerp(headLerp, (crouching ? CAMERA_CROUCH_HEIGHT : CAMERA_HEIGHT), 20.0f*delta);
         player.camera.position = (Vector3){
             player.body.position.x + cameraPosAdd.x,
             player.body.position.y + headLerp,
@@ -625,15 +633,15 @@ CroutchCheckEnd: ;
             const Ray downwardRay = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
                                                , body->position.y
                                                , body->position.z + sin(i)*(body->size - 0.001f) }
-                                    , (Vector3){ 0, -1000, 0 } };
+                                    , (Vector3){ 0, -1000.f, 0 } };
 
             const Ray upwardRay   = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
                                                , body->position.y
                                                , body->position.z + sin(i)*(body->size - 0.001f) }
-                                    , (Vector3){ 0, 1000, 0 } };
+                                    , (Vector3){ 0, 1000.f, 0 } };
 
-            RayCollision closestFloorCollision = { .distance = 10000 };
-            RayCollision closestCeilingCollision = { .distance = 10000 };
+            RayCollision closestFloorCollision = { .distance = 10000.f };
+            RayCollision closestCeilingCollision = { .distance = 10000.f };
 
             for (int j = 0; j < map.meshCount; ++j)
             {
@@ -647,14 +655,28 @@ CroutchCheckEnd: ;
                     closestCeilingCollision = ceilingCollision;
             }
 
-            if (closestCeilingCollision.hit && closestCeilingCollision.distance <= 0.001)
+            if (closestCeilingCollision.hit)
             {
-                body->position.y = closestCeilingCollision.point.y;
-                body->velocity.y = 0.0f;
-                body->isGrounded = true;
-                skipGroundCollisionCheck = true;
+                if (closestCeilingCollision.distance * 1000 <= 0.5f)
+                {
+                    body->position.y = closestCeilingCollision.point.y;
+                    body->isGrounded = true;
+                    body->velocity.y = 0.0f;
+                    skipGroundCollisionCheck = true;
+                    continue;
+                }
+                else if (!*crouchHold && closestCeilingCollision.distance * 1000 <= STAND_HEIGHT)
+                {
+                    body->position.y = closestCeilingCollision.point.y - STAND_HEIGHT - 0.15f;
+                    body->isGrounded = false;
+                    body->velocity.y = 0.0f;
+                    skipGroundCollisionCheck = true;
+                    continue;
+                }
             }
-            else if (closestFloorCollision.hit && closestFloorCollision.distance * 1000 >= 0.01) body->isGrounded = false;
+
+            if (closestFloorCollision.hit && closestFloorCollision.distance * 1000 >= 0.01f)
+                 body->isGrounded = false;
             else {
                 body->isGrounded = true;
                 skipGroundCollisionCheck = true;
@@ -709,6 +731,13 @@ static void UpdateCameraFPS(Camera *camera)
 }
 
 
+static void DrawEnemies(Camera camera)
+{
+    for (int i = 0; i < enemies.enemyCount; ++i)
+        DrawBillboard(camera, self_idle, enemies.enemy->body.position, 2.2f, WHITE);
+}
+
+
 // Draw game level
 static void DrawLevel(Camera camera)
 {
@@ -728,13 +757,7 @@ static void DrawLevel(Camera camera)
     DrawModelWires(level, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
-    BoundingBox box = GetMeshBoundingBox(level.meshes[2]);
-
-    DrawBillboard(camera, self_idle, (Vector3){
-                                         (box.min.x + box.max.x) * 0.5f,
-                                         (box.min.y + box.max.y) * 0.5f,
-                                         (box.min.z + box.max.z) * 0.5f
-                                     }, 2.2f, WHITE);
+    DrawEnemies(camera);
 
     if (debugMode)
     {
