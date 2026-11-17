@@ -1,9 +1,8 @@
 #include "include/game.h"
 
-#include <assert.h>
+#include <stdlib.h> // For NULL
 #include <math.h>
 #include <stdbool.h>
-#include <stdio.h>
 
 #include "raylib.h"
 #include "raygui.h"
@@ -39,6 +38,11 @@
 #define FOV             80.0f
 
 #define DEFAULT_BODY_SIZE 0.25f
+#define NUM_OF_BODY_COLLISION_VERTECIES 8.f
+// Using radians instead of degrees
+// 360 degrees = 2 * PI radians
+// This is because cos() and sin() expect angles in radians
+#define COLLISION_ANGLE_DIFFERENCE 2 * PI / NUM_OF_BODY_COLLISION_VERTECIES
 
 #define NORMALIZE_INPUT  0
 
@@ -66,14 +70,33 @@ typedef struct {
 typedef enum {
     MEELE
    ,GUN
+   ,EnemyTypeSize
 } EnemyType;
 
 typedef enum {
-    WANDERING
+    IDLE
    ,CHASING
-   ,FIGHTING
-   ,DEAD
+   ,ATTACKING
+   ,DYING
+   ,EnemyStatusSize
 } EnemyStatus;
+
+typedef enum {
+    STAND
+   ,WALK
+   ,ATTACK
+   ,PAIN
+   ,DIE
+   ,AnimationTypeSize
+} AnimationType;
+
+typedef enum {
+    FRONT
+   ,RIGHT
+   ,LEFT
+   ,BACK
+   ,SpriteTypeSize
+} SpriteDirection;
 
 typedef struct {
     Body body;
@@ -113,7 +136,7 @@ static Map map;
 static BoundingBox finish;
 static RenderTexture2D target;
 
-static Texture2D self_idle;
+static Texture2D enemySprites[EnemyTypeSize][AnimationTypeSize][SpriteTypeSize];
 
 static Model level;
 
@@ -123,12 +146,13 @@ static Model level;
 static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
 static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
+static void UpdateEnemies();
 
 
 
 static Vector3 CenterMeshPos(Mesh mesh) {
     BoundingBox box = GetMeshBoundingBox(mesh);
-    return (Vector3){ (box.min.x + box.max.x) * 0.5f, (box.min.y + box.max.y) * 0.5f, (box.min.z + box.max.z) * 0.5f };
+    return (Vector3){ (box.min.x + box.max.x) * 0.5f, box.min.y, (box.min.z + box.max.z) * 0.5f };
 }
 
 
@@ -139,14 +163,78 @@ bool LoadGame(void)
 
     if (firstLoad)
     {
-        self_idle = LoadTexture("assets/art/sprites/entities/self/idle.png");
-        if (!IsTextureValid(self_idle)) {
-            printf("Couldn't load Texture!\n");
-            return false;
+        if (debugMode) SetTraceLogLevel(LOG_ALL);
+
+        const char* pathEnemy = "assets/art/sprites/entities/";
+        for (EnemyType type = 0; type < EnemyTypeSize; ++type)
+        {
+            char pathEnemyType[256];
+            int pathLength = TextCopy(pathEnemyType, pathEnemy);
+
+            switch (type) {
+            case MEELE:
+                TextAppend(pathEnemyType, "self/", &pathLength);
+                break;
+            case GUN:
+                TextAppend(pathEnemyType, "gun/", &pathLength);
+                break;
+            default:
+                TraceLog(LOG_ERROR, "LoadGame: This EnemyType does not exist!");
+            }
+            for (AnimationType status = 0; status < AnimationTypeSize; ++status)
+            {
+                char pathEnemyAnimation[256];
+                pathLength = TextCopy(pathEnemyAnimation, pathEnemyType);
+
+                switch (status) {
+                case STAND:
+                    TextAppend(pathEnemyAnimation, "stand/", &pathLength);
+                    break;
+                case WALK:
+                    TextAppend(pathEnemyAnimation, "walk/", &pathLength);
+                    break;
+                case ATTACK:
+                    TextAppend(pathEnemyAnimation, "attack/", &pathLength);
+                    break;
+                case PAIN:
+                    TextAppend(pathEnemyAnimation, "pain/", &pathLength);
+                    break;
+                case DIE:
+                    TextAppend(pathEnemyAnimation, "die/", &pathLength);
+                    break;
+                default:
+                    TraceLog(LOG_ERROR, "LoadGame: This EnemyStatus does not exist!");
+                }
+                for (SpriteDirection sprite = 0; sprite < SpriteTypeSize; ++sprite)
+                {
+                    char pathEnemySprite[256];
+                    pathLength = TextCopy(pathEnemySprite, pathEnemyAnimation);
+
+                    switch (sprite) {
+                    case FRONT:
+                        TextAppend(pathEnemySprite, "f.png", &pathLength);
+                        break;
+                    case RIGHT:
+                        TextAppend(pathEnemySprite, "r.png", &pathLength);
+                        break;
+                    case LEFT:
+                        TextAppend(pathEnemySprite, "l.png", &pathLength);
+                        break;
+                    case BACK:
+                        TextAppend(pathEnemySprite, "b.png", &pathLength);
+                        break;
+                    default:
+                        TraceLog(LOG_ERROR, "LoadGame: This EnemyStatus does not exist!");
+                    }
+
+                    enemySprites[type][status][sprite] = LoadTexture(pathEnemySprite);
+                }
+            }
         }
+
         level = LoadModel("assets/maps/map.glb");
         if (!IsModelValid(level)) {
-            printf("Couldn't load Model!\n");
+            TraceLog(LOG_ERROR, "Couldn't load Model!");
             return false;
         }
 
@@ -163,15 +251,15 @@ bool LoadGame(void)
     //----------------------------------------------------------------------------------
     if (debugMode)
     {
-        printf("%d %d\n\n", level.materialCount, level.meshCount);
+        TraceLog(LOG_DEBUG, "%d %d", level.materialCount, level.meshCount);
         for (int i = 0; i < level.materialCount; ++i)
         {
-            printf("%d ", level.materials[i].maps[0].color.r);
-            printf("%d ", level.materials[i].maps[0].color.g);
-            printf("%d ", level.materials[i].maps[0].color.b);
-            printf("%d ", level.materials[i].maps[0].color.a);
+            TraceLog(LOG_DEBUG, "%d %d %d %d", level.materials[i].maps[0].color.r
+                                             , level.materials[i].maps[0].color.g
+                                             , level.materials[i].maps[0].color.b
+                                             , level.materials[i].maps[0].color.a);
 
-            printf("\n");
+            TraceLog(LOG_DEBUG, "");
         }
     }
 
@@ -193,7 +281,7 @@ bool LoadGame(void)
         else if (ColorIsEqual(meshMaterialColor, meeleEnemyColor))
         {
             enemies.enemy[enemyCounter].type = MEELE;
-            enemies.enemy[enemyCounter].status = WANDERING;
+            enemies.enemy[enemyCounter].status = IDLE;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
@@ -207,7 +295,7 @@ bool LoadGame(void)
         else if (ColorIsEqual(meshMaterialColor, gunEnemyColor))
         {
             enemies.enemy[enemyCounter].type = GUN;
-            enemies.enemy[enemyCounter].status = WANDERING;
+            enemies.enemy[enemyCounter].status = IDLE;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
@@ -253,7 +341,11 @@ bool LoadGame(void)
 
 void UnloadGame(void)
 {
-    UnloadTexture(self_idle);
+    for (EnemyType type = 0; type < EnemyTypeSize; ++type)
+        for (AnimationType status = 0; status < AnimationTypeSize; ++status)
+            for (SpriteDirection sprite = 0; sprite < SpriteTypeSize; ++sprite)
+                UnloadTexture(enemySprites[type][status][sprite]);
+
     UnloadModel(level);
 }
 
@@ -272,27 +364,22 @@ PauseCode DrawPause(void) {
         if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
                                  , WINDOW_HEIGHT * 0.5 - BUTTON_HEIGHT - BUTTON_MARGIN
                                  , BUTTON_WIDTH, BUTTON_HEIGHT }, "continue"))
-        {
             return CONTINUE;
-        }
+
         if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
                                  , WINDOW_HEIGHT * 0.5
                                  , BUTTON_WIDTH, BUTTON_HEIGHT }, "restart"))
-        {
             return RESTART;
-        }
+
         if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
                                  , WINDOW_HEIGHT * 0.5 + BUTTON_HEIGHT + BUTTON_MARGIN
                                  , BUTTON_WIDTH, BUTTON_HEIGHT }, "main menu"))
-        {
             return MAIN_MENU;
-        }
+
         if (GuiButton((Rectangle){ (WINDOW_WIDTH - BUTTON_WIDTH) * 0.5
                                  , WINDOW_HEIGHT * 0.5 + (BUTTON_HEIGHT + BUTTON_MARGIN) * 2
                                  , BUTTON_WIDTH, BUTTON_HEIGHT }, "exit to desktop"))
-        {
             return EXIT_TO_DESKTOP;
-        }
 
     EndDrawing();
     return PAUSE;
@@ -423,16 +510,9 @@ void DrawGame(void)
                 DrawText(TextFormat("%02.02f %02.02f %02.02f", player.body.dir.x, player.body.dir.y, player.body.dir.z), 100, 160, 10, PURPLE);
                 DrawText("` TO TURN OFF DEBUG STUFF", 350, 50, 30, RED);
 
-                static const int numberOfDirections = 8;
-                // Using radians instead of degrees
-                // 360 degrees = 2 * PI radians
-                // This is because cos() and sin() expect angles in radians
-                static const float rayAngleDifference = 2 * PI / (float)numberOfDirections;
                 static const float radius = 75.0f;
-
                 static const Vector2 center = { WINDOW_WIDTH - 100, 100 };
-
-                for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+                for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
                 {
                     // https://gamemath.com/book/cartesianspace.html#trig_functins
                     // cos(angle) = x, sin(angle) = y
@@ -463,15 +543,11 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 #endif
 
     // Cheking that player can stand up
-    static const int numberOfDirections = 8;
-    // Using radians instead of degrees
-    // 360 degrees = 2 * PI radians
-    // This is because cos() and sin() expect angles in radians
-    static const float rayAngleDifference = 2*PI / (float)numberOfDirections;
+
     // (Sorry for duplicating this for loop i'm cringe
     if (prevFrameCrouchHold == true && *crouchHold == false)
     {
-        for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+        for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
         {
             const Ray heightRay = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
                                              , body->position.y + CROUCH_HEIGHT
@@ -493,7 +569,6 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
             }
         }
     }
-
 CroutchCheckEnd: ;
 
     float delta = GetFrameTime();
@@ -546,7 +621,7 @@ CroutchCheckEnd: ;
     // Checking collision
     //----------------------------------------------------------------------------------
     bool skipGroundCollisionCheck = false;
-    for (float i = 0; i < 2 * PI; i += rayAngleDifference)
+    for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
     {
         // Wall collision
         //----------------------------------------------------------------------------------
@@ -618,6 +693,47 @@ CroutchCheckEnd: ;
                 collidingRay = NULL;
             }
         }
+        // (Sorry for copypasta)
+        for (int j = 0; j < enemies.enemyCount; ++j)
+        {
+            // Checking that this is not the same entity
+            if (!Vector3Equals(body->position, enemies.enemy->body.position))
+            {
+                Body enemyBody = enemies.enemy[j].body;
+                BoundingBox enemyBox = { (Vector3){ enemyBody.position.x - enemyBody.size
+                                                  , enemyBody.position.y
+                                                  , enemyBody.position.z - enemyBody.size }
+                                       , (Vector3){ enemyBody.position.x + enemyBody.size
+                                                  , enemyBody.position.y + 100.0f
+                                                  , enemyBody.position.z + enemyBody.size } };
+
+                const RayCollision downWallCollision = GetRayCollisionBox(kneeRay, enemyBox);
+                if (downWallCollision.hit && downWallCollision.distance < body->size)
+                    collidingRay = &downWallCollision;
+
+                const RayCollision upWallCollision   = GetRayCollisionBox(headRay, enemyBox);
+                if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
+                    collidingRay = &upWallCollision;
+
+                if (collidingRay != NULL)
+                {
+                    // How much body clipped
+                    float clip = body->size - collidingRay->distance;
+
+                    if (collidingRay->normal.x * body->velocity.x
+                      + collidingRay->normal.z * body->velocity.z > 0) clip *= -1;
+
+                    // Vector to add to unclip the body
+                    const Vector3 unclip = { collidingRay->normal.x * clip
+                                           , 0
+                                           , collidingRay->normal.z * clip };
+
+                    body->position = Vector3Add(body->position, unclip);
+                    collidingRay = NULL;
+                }
+            }
+        }
+
 
         // Floor and ceiling collision
         //----------------------------------------------------------------------------------
@@ -657,7 +773,7 @@ CroutchCheckEnd: ;
 
             if (closestCeilingCollision.hit)
             {
-                if (closestCeilingCollision.distance * 1000 <= 0.5f)
+                if (closestCeilingCollision.distance * 1000.f <= 0.5f)
                 {
                     body->position.y = closestCeilingCollision.point.y;
                     body->isGrounded = true;
@@ -665,7 +781,7 @@ CroutchCheckEnd: ;
                     skipGroundCollisionCheck = true;
                     continue;
                 }
-                else if (!*crouchHold && closestCeilingCollision.distance * 1000 <= STAND_HEIGHT)
+                else if (!*crouchHold && closestCeilingCollision.distance * 1000.f <= STAND_HEIGHT)
                 {
                     body->position.y = closestCeilingCollision.point.y - STAND_HEIGHT - 0.15f;
                     body->isGrounded = false;
@@ -675,7 +791,7 @@ CroutchCheckEnd: ;
                 }
             }
 
-            if (closestFloorCollision.hit && closestFloorCollision.distance * 1000 >= 0.01f)
+            if (closestFloorCollision.hit && closestFloorCollision.distance * 1000.f >= 0.01f)
                  body->isGrounded = false;
             else {
                 body->isGrounded = true;
@@ -731,10 +847,58 @@ static void UpdateCameraFPS(Camera *camera)
 }
 
 
+static void DrawBodyMapCollision(Body body)
+{
+    for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
+    {
+        // https://gamemath.com/book/cartesianspace.html#trig_functins
+
+        const Vector3 kneeVector = { body.position.x + cos(i) * body.size
+                                   , body.position.y + CROUCH_HEIGHT
+                                   , body.position.z + sin(i) * body.size };
+
+        const Vector3 headVector = { body.position.x + cos(i) * body.size
+                                   , body.position.y + STAND_HEIGHT
+                                   , body.position.z + sin(i) * body.size };
+
+        DrawSphereEx(kneeVector, 0.02f, 8, 8, WHITE);
+        DrawSphereEx(headVector, 0.02f, 8, 8, WHITE);
+    }
+
+    Vector3 bodyKnees = { body.position.x
+                        , body.position.y + CROUCH_HEIGHT
+                        , body.position.z };
+
+    DrawRay((Ray){ bodyKnees, body.dir }, ORANGE);
+    DrawRay((Ray){ bodyKnees, body.velocity }, YELLOW);
+
+    BoundingBox bodyBox = { (Vector3){ body.position.x - body.size
+                                     , body.position.y
+                                     , body.position.z - body.size }
+                          , (Vector3){ body.position.x + body.size
+                                     , body.position.y + 100.0f
+                                     , body.position.z + body.size } };
+    DrawBoundingBox(bodyBox, RED);
+}
+
+
 static void DrawEnemies(Camera camera)
 {
     for (int i = 0; i < enemies.enemyCount; ++i)
-        DrawBillboard(camera, self_idle, enemies.enemy->body.position, 2.2f, WHITE);
+    {
+        Enemy enemy = enemies.enemy[i];
+        Texture2D enemySprite = enemySprites[enemy.type][enemy.status][FRONT];
+        // if (debugMode && !IsTextureValid(enemySprite))
+        //     TraceLog(LOG_ERROR, "DrawEnemies: trying to draw not existing texture %d %d %d", enemy.type, enemy.status, FRONT);
+        DrawBillboard(camera, enemySprite, (Vector3){ enemies.enemy->body.position.x
+                                                    , enemies.enemy->body.position.y / 2
+                                                    , enemies.enemy->body.position.z }
+                                         , 2.0f, WHITE);
+        if (debugMode)
+        {
+            DrawBodyMapCollision(enemies.enemy->body);
+        }
+    }
 }
 
 
@@ -742,8 +906,6 @@ static void DrawEnemies(Camera camera)
 static void DrawLevel(Camera camera)
 {
     rlDisableBackfaceCulling();
-    // DrawMesh(level.meshes[0], level.materials[1], level.transform);
-    // DrawModel(level, Vector3Zero(), 1.0f, WHITE);
 
     // static int a = 0;
     // if (IsKeyPressed(KEY_Q)) ++a;
@@ -754,52 +916,13 @@ static void DrawLevel(Camera camera)
         DrawMesh(currentMesh, level.materials[map.materialIdxes[i]], level.transform);
     }
 
+    if (debugMode)
+    {
+        DrawBodyMapCollision(player.body);
+    }
+
     DrawModelWires(level, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
     DrawEnemies(camera);
-
-    if (debugMode)
-    {
-        static const int numberOfDirections = 8;
-        // Using radians instead of degrees
-        // 360 degrees = 2 * PI radians
-        // This is because cos() and sin() expect angles in radians
-        static const float rayAngleDifference = 2 * PI / (float)numberOfDirections;
-
-        for (float i = 0; i < 2 * PI; i += rayAngleDifference)
-        {
-            // https://gamemath.com/book/cartesianspace.html#trig_functins
-            // cos(angle) = x, sin(angle) = y
-            // Ray ray = { (Vector3){ player.position.x
-            //                      , player.position.y + CROUCH_HEIGHT
-            //                      , player.position.z }
-            //           , (Vector3){ cos(i) * player.size
-            //                      , 0
-            //                      , sin(i) * player.size } };
-            // DrawRay(ray, BLUE);
-
-            const Vector3 kneeVector = { player.body.position.x + cos(i) * player.body.size
-                                       , player.body.position.y + CROUCH_HEIGHT
-                                       , player.body.position.z + sin(i) * player.body.size };
-
-            const Vector3 headVector = { player.body.position.x + cos(i) * player.body.size
-                                       , player.body.position.y + STAND_HEIGHT
-                                       , player.body.position.z + sin(i) * player.body.size };
-
-            DrawSphere(kneeVector, 0.01f, BLACK);
-            DrawSphere(headVector, 0.01f, BLACK);
-        }
-
-        DrawRay((Ray){ (Vector3){ player.body.position.x
-                                , player.body.position.y + CROUCH_HEIGHT
-                                , player.body.position.z }
-                     , player.body.dir }, ORANGE);
-
-        DrawRay((Ray){ (Vector3){ player.body.position.x
-                                , player.body.position.y + CROUCH_HEIGHT
-                                , player.body.position.z }
-                     , player.body.velocity }, YELLOW);
-
-    }
 }

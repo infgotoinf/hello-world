@@ -27,6 +27,7 @@ pkgs.mkShell {
     pkgconf
 
     # clang-tools
+    gdb-dashboard
   ];
 
   # Audio dependencies

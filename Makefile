@@ -55,6 +55,11 @@ run: build
 else
 run: build
 	cd $(BUILD_DIR)/$(PROJECT_NAME) && ./$(PROJECT_NAME)
+
+ifeq ($(BUILD_TYPE),Debug)
+debrun: build
+	cd $(BUILD_DIR)/$(PROJECT_NAME) && gdb-dashboard $(PROJECT_NAME)
+endif
 endif
 
 clean:
