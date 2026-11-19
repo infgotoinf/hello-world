@@ -131,10 +131,16 @@ typedef enum {
 } WeaponAnimation;
 
 
+typedef enum {
+    LAYING
+   ,PICKED_UP
+} ItemStatus;
+
 typedef struct {
     BoundingBox hitbox;
     Vector3 pos;
     int type;
+    ItemStatus status;
 } Item;
 
 typedef struct {
@@ -173,6 +179,7 @@ static Items items;
 static Map map;
 static BoundingBox finish;
 static RenderTexture2D target;
+static Item *selectedWeapon = NULL;
 
 static Texture2D enemySprites[EnemyTypeSize][EnemyAnimationSize][DirectionSize];
 static Texture2D itemSprites[TotalItemTypeSize];
@@ -186,7 +193,10 @@ static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
 static bool CheckCanUncrouch(Body *body);
 static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
-static void UpdateEnemies();
+static void UpdateEnemies(void);
+static void UpdateItems(void);
+static void DrawWeapon(void);
+static void UpdateWeapon(void);
 
 
 
@@ -380,6 +390,7 @@ bool LoadGame(void)
                 .type   = SLEDGE_HAMMER,
                 .hitbox = GetMeshBoundingBox(level.meshes[i]),
                 .pos    = CenterMeshPos(level.meshes[i]),
+                .status = LAYING,
             };
             items.items[itemCounter++] = item;
         }
@@ -598,6 +609,7 @@ void DrawGame(void)
         lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
 
         UpdateEnemies();
+        UpdateItems();
 
         UpdateCameraFPS(&player.camera);
         //----------------------------------------------------------------------------------
@@ -610,6 +622,8 @@ void DrawGame(void)
             BeginMode3D(player.camera);
                 DrawLevel(player.camera);
             EndMode3D();
+
+            DrawWeapon();
 
             // Draw info box
             if (debugMode)
@@ -919,7 +933,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 }
 
 
-static void UpdateEnemies()
+static void UpdateEnemies(void)
 {
     for (int i = 0; i < enemies.count; ++i)
     {
@@ -1047,7 +1061,7 @@ static void DrawEnemies(Camera camera)
 
         float playerEnemyAngle = Vector2Angle(enemyVector, enemyDirVector) * RAD2DEG;
 
-        if (debugMode) TraceLog(LOG_DEBUG, "DrawEnemies: playerEnemyAngle %02.02f", playerEnemyAngle);
+        // if (debugMode) TraceLog(LOG_DEBUG, "DrawEnemies: playerEnemyAngle %02.02f", playerEnemyAngle);
 
         if      (fabsf(playerEnemyAngle) < 45.0f)
             enemySprite = enemySprites[enemy.type][enemy.status][RIGHT];
@@ -1080,11 +1094,76 @@ static void DrawItems(Camera camera)
 {
     for (int i = 0; i < items.count; ++i)
     {
+        if (items.items[i].status == PICKED_UP) continue;
         DrawBillboard(camera, itemSprites[items.items[i].type]
                      , (Vector3){ items.items[i].pos.x
                                 , items.items[i].hitbox.max.y * 0.25
                                 , items.items[i].pos.z }
                      , 1.0f, WHITE);
+
+        if (debugMode)
+        {
+            DrawBoundingBox(items.items[i].hitbox, GREEN);
+        }
+    }
+}
+
+
+static void UpdateItems(void)
+{
+    for (int i = 0; i < items.count; ++i)
+    {
+        if (items.items[i].status == PICKED_UP) continue;
+        BoundingBox playerHitbox = { (Vector3){ player.body.position.x - player.body.size
+                                              , player.body.position.y
+                                              , player.body.position.z - player.body.size }
+                                   , (Vector3){ player.body.position.x + player.body.size
+                                              , player.body.position.y + STAND_HEIGHT
+                                              , player.body.position.z + player.body.size } };
+
+        if (CheckCollisionBoxes(items.items[i].hitbox, playerHitbox))
+        {
+            items.items[i].status = PICKED_UP;
+            if (items.items[i].type < WeaponTypeSize)
+                selectedWeapon = &items.items[i];
+        }
+    }
+}
+
+
+static void DrawWeapon(void)
+{
+    if (selectedWeapon != NULL)
+    {
+        static int frameCounter = 0;
+
+        AnimationFrames currentAnimationFrames = weaponAnimations[selectedWeapon->type][W_IDLE];
+        if (!IsTextureValid(currentAnimationFrames.frames[frameCounter]))
+        {
+            TraceLog(LOG_ERROR, "DrawWeapon: frame isn't valid!");
+        }
+        // DrawTexture(currentAnimationFrames.frames[frameCounter], 0, 0, WHITE);
+        DrawTextureEx(currentAnimationFrames.frames[frameCounter], Vector2Zero(), 0, 3.0f, WHITE);
+
+
+        static const float timeBetweenAnimationFrames = 1.0f / 12.0f;
+        static float time = 0;
+        if (GetTime() - time > timeBetweenAnimationFrames)
+        {
+            ++frameCounter;
+            time = GetTime();
+        }
+
+        if (frameCounter >= currentAnimationFrames.count) frameCounter = 0;
+    }
+}
+
+
+static void UpdateWeapon(void)
+{
+    if (selectedWeapon != NULL )
+    {
+
     }
 }
 
