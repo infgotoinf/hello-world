@@ -47,6 +47,7 @@
 #define NORMALIZE_INPUT  0
 
 #define MAX_ENEMY_COUNT    50
+#define MAX_ITEM_COUNT     50
 #define MAX_MAP_MESH_COUNT 50
 
 
@@ -69,7 +70,7 @@ typedef struct {
 
 typedef enum {
     MEELE
-   ,GUN
+   ,GUNNER
    ,EnemyTypeSize
 } EnemyType;
 
@@ -87,16 +88,16 @@ typedef enum {
    ,ATTACK
    ,PAIN
    ,DIE
-   ,AnimationTypeSize
-} AnimationType;
+   ,EnemyAnimationSize
+} EnemyAnimation;
 
 typedef enum {
     FRONT
    ,RIGHT
    ,LEFT
    ,BACK
-   ,SpriteTypeSize
-} SpriteDirection;
+   ,DirectionSize
+} Direction;
 
 typedef struct {
     Body body;
@@ -106,9 +107,45 @@ typedef struct {
 } Enemy;
 
 typedef struct {
-    Enemy *enemy;
-    int enemyCount;
+    Enemy *enemies;
+    int count;
 } Enemies;
+
+
+typedef enum {
+    SLEDGE_HAMMER
+   ,PISTOL
+   ,WeaponTypeSize
+} WeaponType;
+
+typedef enum {
+    MEDKIT = WeaponTypeSize // Offseting cause Item.type can be both WeaponType and ItemType
+   ,AMMO
+   ,TotalItemTypeSize
+} ItemType;
+
+typedef enum {
+    W_IDLE
+   ,W_ATTACK
+   ,WeaponAnimationSize
+} WeaponAnimation;
+
+
+typedef struct {
+    BoundingBox hitbox;
+    Vector3 pos;
+    int type;
+} Item;
+
+typedef struct {
+    Item *items;
+    int count;
+} Items;
+
+typedef struct {
+    Texture2D *frames;
+    int count;
+} AnimationFrames;
 
 
 typedef struct {
@@ -132,20 +169,22 @@ static bool debugMode = true;
 static bool prevFrameCrouchHold = false;
 
 static Enemies enemies;
+static Items items;
 static Map map;
 static BoundingBox finish;
 static RenderTexture2D target;
 
-static Texture2D enemySprites[EnemyTypeSize][AnimationTypeSize][SpriteTypeSize];
+static Texture2D enemySprites[EnemyTypeSize][EnemyAnimationSize][DirectionSize];
+static Texture2D itemSprites[TotalItemTypeSize];
+static AnimationFrames weaponAnimations[WeaponTypeSize][WeaponAnimationSize];
 
 static Model level;
 
 
 
-
 static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
-static bool CheckCanUncrouch(Body *body, bool crouchHold);
+static bool CheckCanUncrouch(Body *body);
 static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
 static void UpdateEnemies();
 
@@ -176,18 +215,19 @@ bool LoadGame(void)
             case MEELE:
                 TextAppend(pathEnemyType, "self/", &pathLength);
                 break;
-            case GUN:
-                TextAppend(pathEnemyType, "gun/", &pathLength);
+            case GUNNER:
+                TextAppend(pathEnemyType, "gunner/", &pathLength);
                 break;
             default:
                 TraceLog(LOG_ERROR, "LoadGame: This EnemyType does not exist!");
+                continue;
             }
-            for (AnimationType status = 0; status < AnimationTypeSize; ++status)
+            for (EnemyAnimation animation = 0; animation < EnemyAnimationSize; ++animation)
             {
                 char pathEnemyAnimation[256];
                 pathLength = TextCopy(pathEnemyAnimation, pathEnemyType);
 
-                switch (status) {
+                switch (animation) {
                 case STAND:
                     TextAppend(pathEnemyAnimation, "stand/", &pathLength);
                     break;
@@ -204,31 +244,84 @@ bool LoadGame(void)
                     TextAppend(pathEnemyAnimation, "die/", &pathLength);
                     break;
                 default:
-                    TraceLog(LOG_ERROR, "LoadGame: This EnemyStatus does not exist!");
+                    TraceLog(LOG_ERROR, "LoadGame: This EnemyAnimation does not exist!");
+                    continue;
                 }
-                for (SpriteDirection sprite = 0; sprite < SpriteTypeSize; ++sprite)
+                for (Direction dir = 0; dir < DirectionSize; ++dir)
                 {
-                    char pathEnemySprite[256];
-                    pathLength = TextCopy(pathEnemySprite, pathEnemyAnimation);
+                    char pathDirection[256];
+                    pathLength = TextCopy(pathDirection, pathEnemyAnimation);
 
-                    switch (sprite) {
+                    switch (dir) {
                     case FRONT:
-                        TextAppend(pathEnemySprite, "f.png", &pathLength);
+                        TextAppend(pathDirection, "f.png", &pathLength);
                         break;
                     case RIGHT:
-                        TextAppend(pathEnemySprite, "r.png", &pathLength);
+                        TextAppend(pathDirection, "r.png", &pathLength);
                         break;
                     case LEFT:
-                        TextAppend(pathEnemySprite, "l.png", &pathLength);
+                        TextAppend(pathDirection, "l.png", &pathLength);
                         break;
                     case BACK:
-                        TextAppend(pathEnemySprite, "b.png", &pathLength);
+                        TextAppend(pathDirection, "b.png", &pathLength);
                         break;
                     default:
-                        TraceLog(LOG_ERROR, "LoadGame: This EnemyStatus does not exist!");
+                        TraceLog(LOG_ERROR, "LoadGame: This Direction does not exist!");
+                        continue;
                     }
 
-                    enemySprites[type][status][sprite] = LoadTexture(pathEnemySprite);
+                    enemySprites[type][animation][dir] = LoadTexture(pathDirection);
+                }
+            }
+        }
+
+        const char* pathItems = "assets/art/sprites/items/";
+        for (int type = 0; type < WeaponTypeSize; ++type)
+        {
+            char pathType[256];
+            int pathLength = TextCopy(pathType, pathItems);
+
+            switch (type) {
+            case SLEDGE_HAMMER:
+                TextAppend(pathType, "sledge_hammer/", &pathLength);
+                break;
+            case PISTOL:
+                TextAppend(pathType, "pistol/", &pathLength);
+                break;
+            default:
+                TraceLog(LOG_ERROR, "LoadGame: This WeaponType does not exist!");
+                continue;
+            }
+
+            char pathSprite[256];
+            pathLength = TextCopy(pathSprite, pathType);
+            TextAppend(pathSprite, "item.png", &pathLength);
+
+            itemSprites[type] = LoadTexture(pathSprite);
+
+            for (WeaponAnimation animation = 0; animation < WeaponAnimationSize; ++animation)
+            {
+                char pathWeaponAnimation[256];
+                pathLength = TextCopy(pathWeaponAnimation, pathType);
+
+                switch (animation) {
+                case W_IDLE:
+                    TextAppend(pathWeaponAnimation, "idle/", &pathLength);
+                    break;
+                case W_ATTACK:
+                    TextAppend(pathWeaponAnimation, "attack/", &pathLength);
+                    break;
+                default:
+                    TraceLog(LOG_ERROR, "LoadGame: This WeaponAnimation does not exist!");
+                    continue;
+                }
+
+                const FilePathList frames = LoadDirectoryFiles(pathWeaponAnimation);
+                weaponAnimations[type][animation].count  = frames.count;
+                weaponAnimations[type][animation].frames = MemAlloc(sizeof(Texture2D) * frames.count);
+                for (unsigned i = 0; i < frames.count; ++i)
+                {
+                    weaponAnimations[type][animation].frames[i] = LoadTexture(frames.paths[i]);
                 }
             }
         }
@@ -242,7 +335,8 @@ bool LoadGame(void)
         target = LoadRenderTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
         firstLoad = false;
 
-        enemies.enemy     = MemAlloc(sizeof(Enemy) * MAX_ENEMY_COUNT);
+        enemies.enemies   = MemAlloc(sizeof(Enemy) * MAX_ENEMY_COUNT);
+        items.items       = MemAlloc(sizeof(Item)  * MAX_ITEM_COUNT);
         map.meshes        = MemAlloc(sizeof(Mesh)  * MAX_MAP_MESH_COUNT);
         map.materialIdxes = MemAlloc(sizeof(int)   * MAX_MAP_MESH_COUNT);
     }
@@ -262,14 +356,17 @@ bool LoadGame(void)
         }
     }
 
-    const Color spawnColor      = {   0,   0, 255, 255 };
-    const Color finishColor     = {   0, 255,   0, 255 };
-    const Color meeleEnemyColor = { 255,   0,   0, 255 };
-    const Color gunEnemyColor   = { 255,   0, 126, 255 };
+    const Color spawnColor        = {   0,   0, 255, 255 };
+    const Color finishColor       = {   0, 255,   0, 255 };
+    const Color meeleEnemyColor   = { 255,   0,   0, 255 };
+    const Color gunEnemyColor     = { 255,   0, 126, 255 };
+
+    const Color sledgeHammerColor = {   0,   0,  12, 255 };
 
     Vector3 spawnPos;
     int enemyCounter = 0;
-    int mapCounter = 0;
+    int itemCounter  = 0;
+    int mapCounter   = 0;
     for (int i = 0; i < level.meshCount; ++i)
     {
         int materialIdxes = level.meshMaterial[i];
@@ -277,39 +374,48 @@ bool LoadGame(void)
 
         if      (ColorIsEqual(meshMaterialColor, spawnColor)) spawnPos = CenterMeshPos(level.meshes[i]);
         else if (ColorIsEqual(meshMaterialColor, finishColor)) finish  = GetMeshBoundingBox(level.meshes[i]);
+        else if (ColorIsEqual(meshMaterialColor, sledgeHammerColor))
+        {
+            Item item = {
+                .type   = SLEDGE_HAMMER,
+                .hitbox = GetMeshBoundingBox(level.meshes[i]),
+                .pos    = CenterMeshPos(level.meshes[i]),
+            };
+            items.items[itemCounter++] = item;
+        }
         else if (ColorIsEqual(meshMaterialColor, meeleEnemyColor))
         {
-            enemies.enemy[enemyCounter].type   = MEELE;
-            enemies.enemy[enemyCounter].status = IDLE;
-            enemies.enemy[enemyCounter].data[0]= 0.0f;
-            enemies.enemy[enemyCounter].data[1]= 1.0f;
-            enemies.enemy[enemyCounter].data[2]= 0.0f;
+            enemies.enemies[enemyCounter].type   = MEELE;
+            enemies.enemies[enemyCounter].status = IDLE;
+            enemies.enemies[enemyCounter].data[0]= 0.0f;
+            enemies.enemies[enemyCounter].data[1]= 1.0f;
+            enemies.enemies[enemyCounter].data[2]= 0.0f;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
                 .velocity = Vector3Zero(), .dir = Vector3Zero(), .isGrounded = true,
 
                 .size = DEFAULT_BODY_SIZE,
-                .hp = 100
+                .hp = 100,
             };
-            enemies.enemy[enemyCounter++].body = body;
+            enemies.enemies[enemyCounter++].body = body;
         }
         else if (ColorIsEqual(meshMaterialColor, gunEnemyColor))
         {
-            enemies.enemy[enemyCounter].type   = GUN;
-            enemies.enemy[enemyCounter].status = IDLE;
-            enemies.enemy[enemyCounter].data[0]= 0.0f;
-            enemies.enemy[enemyCounter].data[1]= 1.0f;
-            enemies.enemy[enemyCounter].data[2]= 0.0f;
+            enemies.enemies[enemyCounter].type   = GUNNER;
+            enemies.enemies[enemyCounter].status = IDLE;
+            enemies.enemies[enemyCounter].data[0]= 0.0f;
+            enemies.enemies[enemyCounter].data[1]= 1.0f;
+            enemies.enemies[enemyCounter].data[2]= 0.0f;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
                 .velocity = Vector3Zero(), .dir = Vector3Zero(), .isGrounded = true,
 
                 .size = DEFAULT_BODY_SIZE,
-                .hp = 100
+                .hp = 100,
             };
-            enemies.enemy[enemyCounter++].body = body;
+            enemies.enemies[enemyCounter++].body = body;
         }
         else
         {
@@ -318,7 +424,8 @@ bool LoadGame(void)
         }
     }
 
-    enemies.enemyCount = enemyCounter;
+    enemies.count = enemyCounter;
+    items.count   = itemCounter;
     map.meshCount = mapCounter;
 
     Body playerBody = {
@@ -347,8 +454,8 @@ bool LoadGame(void)
 void UnloadGame(void)
 {
     for (EnemyType type = 0; type < EnemyTypeSize; ++type)
-        for (AnimationType status = 0; status < AnimationTypeSize; ++status)
-            for (SpriteDirection sprite = 0; sprite < SpriteTypeSize; ++sprite)
+        for (EnemyAnimation status = 0; status < EnemyAnimationSize; ++status)
+            for (Direction sprite = 0; sprite < DirectionSize; ++sprite)
                 UnloadTexture(enemySprites[type][status][sprite]);
 
     UnloadModel(level);
@@ -462,7 +569,7 @@ void DrawGame(void)
         char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
         bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
         if (crouching == false && prevFrameCrouchHold == true)
-            crouching = !CheckCanUncrouch(&player.body, crouching);
+            crouching = !CheckCanUncrouch(&player.body);
 
         UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
         prevFrameCrouchHold = crouching;
@@ -542,7 +649,7 @@ void DrawGame(void)
 //----------------------------------------------------------------------------------
 // Module Functions Definition
 //----------------------------------------------------------------------------------
-static bool CheckCanUncrouch(Body *body, bool crouchHold)
+static bool CheckCanUncrouch(Body *body)
 {
     // Cheking that player can stand up
     // (Sorry for duplicating this for loop i'm cringe
@@ -704,12 +811,12 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
             }
         }
         // (Sorry for copypasta)
-        for (int j = 0; j < enemies.enemyCount; ++j)
+        for (int j = 0; j < enemies.count; ++j)
         {
             // Checking that this is not the same entity
-            if (!Vector3Equals(body->position, enemies.enemy[j].body.position))
+            if (!Vector3Equals(body->position, enemies.enemies[j].body.position))
             {
-                Body enemyBody = enemies.enemy[j].body;
+                Body enemyBody = enemies.enemies[j].body;
                 BoundingBox enemyBox = { (Vector3){ enemyBody.position.x - enemyBody.size
                                                   , enemyBody.position.y
                                                   , enemyBody.position.z - enemyBody.size }
@@ -814,11 +921,11 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 
 static void UpdateEnemies()
 {
-    for (int i = 0; i < enemies.enemyCount; ++i)
+    for (int i = 0; i < enemies.count; ++i)
     {
         static bool enemyCrouch = false;
 
-        Enemy *currentEnemy = &enemies.enemy[i];
+        Enemy *currentEnemy = &enemies.enemies[i];
         switch (currentEnemy->status) {
         case IDLE:
             if (currentEnemy->data[0] <= 0)
@@ -926,9 +1033,9 @@ static void DrawBodyMapCollision(Body body)
 
 static void DrawEnemies(Camera camera)
 {
-    for (int i = 0; i < enemies.enemyCount; ++i)
+    for (int i = 0; i < enemies.count; ++i)
     {
-        Enemy enemy = enemies.enemy[i];
+        Enemy enemy = enemies.enemies[i];
         Texture2D enemySprite;
 
         Vector2 enemyVector = Vector2Subtract(
@@ -963,8 +1070,21 @@ static void DrawEnemies(Camera camera)
                                          , 2.0f, WHITE);
         if (debugMode)
         {
-            DrawBodyMapCollision(enemies.enemy->body);
+            DrawBodyMapCollision(enemies.enemies->body);
         }
+    }
+}
+
+
+static void DrawItems(Camera camera)
+{
+    for (int i = 0; i < items.count; ++i)
+    {
+        DrawBillboard(camera, itemSprites[items.items[i].type]
+                     , (Vector3){ items.items[i].pos.x
+                                , items.items[i].hitbox.max.y * 0.25
+                                , items.items[i].pos.z }
+                     , 1.0f, WHITE);
     }
 }
 
@@ -992,4 +1112,5 @@ static void DrawLevel(Camera camera)
     rlEnableBackfaceCulling();
 
     DrawEnemies(camera);
+    DrawItems(camera);
 }
