@@ -38,7 +38,7 @@
 #define FOV             80.0f
 
 #define DEFAULT_BODY_SIZE 0.25f
-#define NUM_OF_BODY_COLLISION_VERTECIES 8.f
+#define NUM_OF_BODY_COLLISION_VERTECIES 4.f
 // Using radians instead of degrees
 // 360 degrees = 2 * PI radians
 // This is because cos() and sin() expect angles in radians
@@ -102,7 +102,7 @@ typedef struct {
     Body body;
     EnemyType type;
     EnemyStatus status;
-    void *data;
+    float data[3];
 } Enemy;
 
 typedef struct {
@@ -145,16 +145,17 @@ static Model level;
 
 static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
-static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool *crouchHold);
+static bool CheckCanUncrouch(Body *body, bool crouchHold);
+static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
 static void UpdateEnemies();
 
 
 
-static Vector3 CenterMeshPos(Mesh mesh) {
+static Vector3 CenterMeshPos(Mesh mesh)
+{
     BoundingBox box = GetMeshBoundingBox(mesh);
     return (Vector3){ (box.min.x + box.max.x) * 0.5f, box.min.y, (box.min.z + box.max.z) * 0.5f };
 }
-
 
 
 bool LoadGame(void)
@@ -258,8 +259,6 @@ bool LoadGame(void)
                                              , level.materials[i].maps[0].color.g
                                              , level.materials[i].maps[0].color.b
                                              , level.materials[i].maps[0].color.a);
-
-            TraceLog(LOG_DEBUG, "");
         }
     }
 
@@ -280,8 +279,11 @@ bool LoadGame(void)
         else if (ColorIsEqual(meshMaterialColor, finishColor)) finish  = GetMeshBoundingBox(level.meshes[i]);
         else if (ColorIsEqual(meshMaterialColor, meeleEnemyColor))
         {
-            enemies.enemy[enemyCounter].type = MEELE;
+            enemies.enemy[enemyCounter].type   = MEELE;
             enemies.enemy[enemyCounter].status = IDLE;
+            enemies.enemy[enemyCounter].data[0]= 0.0f;
+            enemies.enemy[enemyCounter].data[1]= 1.0f;
+            enemies.enemy[enemyCounter].data[2]= 0.0f;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
@@ -294,8 +296,11 @@ bool LoadGame(void)
         }
         else if (ColorIsEqual(meshMaterialColor, gunEnemyColor))
         {
-            enemies.enemy[enemyCounter].type = GUN;
+            enemies.enemy[enemyCounter].type   = GUN;
             enemies.enemy[enemyCounter].status = IDLE;
+            enemies.enemy[enemyCounter].data[0]= 0.0f;
+            enemies.enemy[enemyCounter].data[1]= 1.0f;
+            enemies.enemy[enemyCounter].data[2]= 0.0f;
 
             Body body = {
                 .position = CenterMeshPos(level.meshes[i]),
@@ -350,7 +355,8 @@ void UnloadGame(void)
 }
 
 
-PauseCode DrawPause(void) {
+PauseCode DrawPause(void)
+{
     BeginDrawing();
 
         ClearBackground(RAYWHITE);
@@ -384,7 +390,6 @@ PauseCode DrawPause(void) {
     EndDrawing();
     return PAUSE;
 }
-
 
 
 void DrawGame(void)
@@ -456,7 +461,10 @@ void DrawGame(void)
         char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
         char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
         bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
-        UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), &crouching);
+        if (crouching == false && prevFrameCrouchHold == true)
+            crouching = !CheckCanUncrouch(&player.body, crouching);
+
+        UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
         prevFrameCrouchHold = crouching;
 
         float delta = GetFrameTime();
@@ -481,6 +489,8 @@ void DrawGame(void)
 
         lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
         lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
+
+        UpdateEnemies();
 
         UpdateCameraFPS(&player.camera);
         //----------------------------------------------------------------------------------
@@ -532,8 +542,36 @@ void DrawGame(void)
 //----------------------------------------------------------------------------------
 // Module Functions Definition
 //----------------------------------------------------------------------------------
+static bool CheckCanUncrouch(Body *body, bool crouchHold)
+{
+    // Cheking that player can stand up
+    // (Sorry for duplicating this for loop i'm cringe
+    for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
+    {
+        const Ray heightRay = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
+                                         , body->position.y + CROUCH_HEIGHT
+                                         , body->position.z + sin(i)*(body->size - 0.001f) }
+                              , (Vector3){ 0
+                                         , STAND_HEIGHT - CROUCH_HEIGHT
+                                         , 0 } };
+
+        for (int j = 0; j < map.meshCount; ++j)
+        {
+            const RayCollision crouchCeilingCollision =
+                    GetRayCollisionMesh(heightRay, map.meshes[j], level.transform);
+
+            if (crouchCeilingCollision.hit && crouchCeilingCollision.distance < STAND_HEIGHT - CROUCH_HEIGHT)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+
 // Update body considering current world state
-void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool *crouchHold)
+void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold)
 {
     Vector2 input = (Vector2){ (float)side, (float)-forward };
 
@@ -541,41 +579,11 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     // Slow down diagonal movement
     if ((side != 0) && (forward != 0)) input = Vector2Normalize(input);
 #endif
-
-    // Cheking that player can stand up
-
-    // (Sorry for duplicating this for loop i'm cringe
-    if (prevFrameCrouchHold == true && *crouchHold == false)
-    {
-        for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
-        {
-            const Ray heightRay = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
-                                             , body->position.y + CROUCH_HEIGHT
-                                             , body->position.z + sin(i)*(body->size - 0.001f) }
-                                  , (Vector3){ 0
-                                             , STAND_HEIGHT - CROUCH_HEIGHT
-                                             , 0 } };
-
-            for (int j = 0; j < map.meshCount; ++j)
-            {
-                const RayCollision crouchCeilingCollision =
-                        GetRayCollisionMesh(heightRay, map.meshes[j], level.transform);
-
-                if (crouchCeilingCollision.hit && crouchCeilingCollision.distance < STAND_HEIGHT - CROUCH_HEIGHT)
-                {
-                    *crouchHold = true;
-                    goto CroutchCheckEnd;
-                }
-            }
-        }
-    }
-CroutchCheckEnd: ;
-
     float delta = GetFrameTime();
 
     if (!body->isGrounded) body->velocity.y -= GRAVITY*delta;
 
-    if (body->isGrounded && jumpPressed && !*crouchHold)
+    if (body->isGrounded && jumpPressed && !crouchHold)
     {
         body->velocity.y = JUMP_FORCE;
         body->isGrounded = false;
@@ -605,7 +613,7 @@ CroutchCheckEnd: ;
     // Whenever the amount of acceleration to add is clamped by the maximum acceleration constant,
     // a Player can make the speed faster by bringing the direction closer to horizontal velocity angle
     // More info here: https://youtu.be/v3zT3Z5apaM?t=165
-    float maxSpeed = (*crouchHold ? CROUCH_SPEED : MAX_SPEED);
+    float maxSpeed = (crouchHold ? CROUCH_SPEED : MAX_SPEED);
     float accel = Clamp(maxSpeed - speed, 0.f, MAX_ACCEL*delta);
     hvel.x += body->dir.x*accel;
     hvel.z += body->dir.z*accel;
@@ -621,7 +629,7 @@ CroutchCheckEnd: ;
     // Checking collision
     //----------------------------------------------------------------------------------
     bool skipGroundCollisionCheck = false;
-    for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
+    for (float i = COLLISION_ANGLE_DIFFERENCE/2; i < 2 * PI + COLLISION_ANGLE_DIFFERENCE/2; i += COLLISION_ANGLE_DIFFERENCE)
     {
         // Wall collision
         //----------------------------------------------------------------------------------
@@ -650,7 +658,7 @@ CroutchCheckEnd: ;
                 collidingRay = &downWallCollision;
 
             const RayCollision upWallCollision   = GetRayCollisionMesh(headRay, map.meshes[j], level.transform);
-            if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
+            if (!crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
                 collidingRay = &upWallCollision;
 
             if (collidingRay != NULL)
@@ -681,8 +689,10 @@ CroutchCheckEnd: ;
                 //       /    \         /
                 //     /       >      /
                 //
-                if (collidingRay->normal.x * body->velocity.x
-                  + collidingRay->normal.z * body->velocity.z > 0) clip *= -1;
+                // if (collidingRay->normal.x * body->velocity.x
+                //   + collidingRay->normal.z * body->velocity.z > 0) clip *= -1;
+                if (collidingRay->normal.x * kneeRay.direction.x
+                  + collidingRay->normal.z * kneeRay.direction.z > 0) clip *= -1;
 
                 // Vector to add to unclip the body
                 const Vector3 unclip = { collidingRay->normal.x * clip
@@ -697,7 +707,7 @@ CroutchCheckEnd: ;
         for (int j = 0; j < enemies.enemyCount; ++j)
         {
             // Checking that this is not the same entity
-            if (!Vector3Equals(body->position, enemies.enemy->body.position))
+            if (!Vector3Equals(body->position, enemies.enemy[j].body.position))
             {
                 Body enemyBody = enemies.enemy[j].body;
                 BoundingBox enemyBox = { (Vector3){ enemyBody.position.x - enemyBody.size
@@ -712,7 +722,7 @@ CroutchCheckEnd: ;
                     collidingRay = &downWallCollision;
 
                 const RayCollision upWallCollision   = GetRayCollisionBox(headRay, enemyBox);
-                if (!*crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
+                if (!crouchHold && upWallCollision.hit && upWallCollision.distance < body->size)
                     collidingRay = &upWallCollision;
 
                 if (collidingRay != NULL)
@@ -781,7 +791,7 @@ CroutchCheckEnd: ;
                     skipGroundCollisionCheck = true;
                     continue;
                 }
-                else if (!*crouchHold && closestCeilingCollision.distance * 1000.f <= STAND_HEIGHT)
+                else if (!crouchHold && closestCeilingCollision.distance * 1000.f <= STAND_HEIGHT)
                 {
                     body->position.y = closestCeilingCollision.point.y - STAND_HEIGHT - 0.15f;
                     body->isGrounded = false;
@@ -797,6 +807,38 @@ CroutchCheckEnd: ;
                 body->isGrounded = true;
                 skipGroundCollisionCheck = true;
             }
+        }
+    }
+}
+
+
+static void UpdateEnemies()
+{
+    for (int i = 0; i < enemies.enemyCount; ++i)
+    {
+        static bool enemyCrouch = false;
+
+        Enemy *currentEnemy = &enemies.enemy[i];
+        switch (currentEnemy->status) {
+        case IDLE:
+            if (currentEnemy->data[0] <= 0)
+            {
+                currentEnemy->data[0] = (float)(GetRandomValue(10, 15) * 0.1f);
+                currentEnemy->data[1] = (float)GetRandomValue(-1, 1);
+                currentEnemy->data[2] = (float)GetRandomValue(-1, 1);
+            }
+            else currentEnemy->data[0] -= 1.0f/FPS;
+            UpdateBody(&currentEnemy->body, 0.0f, currentEnemy->data[1]
+                                                , currentEnemy->data[2], false, enemyCrouch);
+            break;
+        case CHASING:
+            break;
+        case ATTACKING:
+            break;
+        case DYING:
+            break;
+        default:
+            TraceLog(LOG_ERROR, "UpdateEnemies: This EnemyType does not exist!");
         }
     }
 }
@@ -849,7 +891,7 @@ static void UpdateCameraFPS(Camera *camera)
 
 static void DrawBodyMapCollision(Body body)
 {
-    for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
+    for (float i = COLLISION_ANGLE_DIFFERENCE/2; i < 2 * PI + COLLISION_ANGLE_DIFFERENCE/2; i += COLLISION_ANGLE_DIFFERENCE)
     {
         // https://gamemath.com/book/cartesianspace.html#trig_functins
 
@@ -887,12 +929,37 @@ static void DrawEnemies(Camera camera)
     for (int i = 0; i < enemies.enemyCount; ++i)
     {
         Enemy enemy = enemies.enemy[i];
-        Texture2D enemySprite = enemySprites[enemy.type][enemy.status][FRONT];
+        Texture2D enemySprite;
+
+        Vector2 enemyVector = Vector2Subtract(
+            (Vector2){ player.body.position.x, player.body.position.z },
+            (Vector2){ enemy.body.position.x, enemy.body.position.z }
+        );
+
+        Vector2 enemyDirVector = { enemy.data[1], enemy.data[2] };
+
+        float playerEnemyAngle = Vector2Angle(enemyVector, enemyDirVector) * RAD2DEG;
+
+        if (debugMode) TraceLog(LOG_DEBUG, "DrawEnemies: playerEnemyAngle %02.02f", playerEnemyAngle);
+
+        if      (fabsf(playerEnemyAngle) < 45.0f)
+            enemySprite = enemySprites[enemy.type][enemy.status][RIGHT];
+
+        else if (fabsf(playerEnemyAngle) > 135.0f)
+            enemySprite = enemySprites[enemy.type][enemy.status][FRONT];
+
+        else if (playerEnemyAngle < 0.0f)
+            enemySprite = enemySprites[enemy.type][enemy.status][LEFT];
+
+        else
+            enemySprite = enemySprites[enemy.type][enemy.status][BACK];
+
         // if (debugMode && !IsTextureValid(enemySprite))
         //     TraceLog(LOG_ERROR, "DrawEnemies: trying to draw not existing texture %d %d %d", enemy.type, enemy.status, FRONT);
-        DrawBillboard(camera, enemySprite, (Vector3){ enemies.enemy->body.position.x
-                                                    , enemies.enemy->body.position.y / 2
-                                                    , enemies.enemy->body.position.z }
+
+        DrawBillboard(camera, enemySprite, (Vector3){ enemy.body.position.x
+                                                    , enemy.body.position.y + enemy.body.size * 4.0f
+                                                    , enemy.body.position.z }
                                          , 2.0f, WHITE);
         if (debugMode)
         {
@@ -919,9 +986,9 @@ static void DrawLevel(Camera camera)
     if (debugMode)
     {
         DrawBodyMapCollision(player.body);
+        DrawModelWires(level, Vector3Zero(), 1.0f, BLACK);
     }
 
-    DrawModelWires(level, Vector3Zero(), 1.0f, BLACK);
     rlEnableBackfaceCulling();
 
     DrawEnemies(camera);
