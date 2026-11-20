@@ -55,13 +55,13 @@ void DrawMainMenu(void) {
 
             ClearBackground(DARKGRAY);
 
-            Vector2 logo_pos = { (WINDOW_WIDTH - logo.width) * 0.5, 100 };
+            Vector2 logo_pos = { (float)(WINDOW_WIDTH - logo.width) * 0.5f, 100 };
             DrawTexture(logo, (int)logo_pos.x, (int)logo_pos.y, WHITE);
 
             // Draw raygui button
             static const int BUTTON_WIDTH = 200;
-            if (GuiButton((Rectangle){ logo_pos.x + logo.width * 0.5 - BUTTON_WIDTH * 0.5
-                                     , logo_pos.y + logo.height + 250
+            if (GuiButton((Rectangle){ (float)logo_pos.x + (float)(logo.width - BUTTON_WIDTH) * 0.5f
+                                     , logo_pos.y + (float)logo.height + 100.f
                                      , BUTTON_WIDTH
                                      , GUI_TEXT_SIZE + GUI_TEXT_MARGIN }, "Play"))
             {
