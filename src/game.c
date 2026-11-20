@@ -21,9 +21,9 @@
 
 // Movement constants
 #define GRAVITY         46.0f
-#define MAX_SPEED        7.0f
+#define MAX_SPEED        6.5f
 #define CROUCH_SPEED     2.5f
-#define JUMP_FORCE      12.0f
+#define JUMP_FORCE      10.0f
 #define MAX_ACCEL       50.0f
 // Grounded drag
 #define FRICTION        0.86f
@@ -38,7 +38,7 @@
 #define FOV             80.0f
 
 #define DEFAULT_BODY_SIZE 0.25f
-#define NUM_OF_BODY_COLLISION_VERTECIES 4.f
+#define NUM_OF_BODY_COLLISION_VERTECIES 4.0f
 // Using radians instead of degrees
 // 360 degrees = 2 * PI radians
 // This is because cos() and sin() expect angles in radians
@@ -49,6 +49,8 @@
 #define MAX_ENEMY_COUNT    50
 #define MAX_ITEM_COUNT     50
 #define MAX_MAP_MESH_COUNT 50
+
+#define ANIMATION_FPS    16.0
 
 
 
@@ -179,7 +181,7 @@ static Items items;
 static Map map;
 static BoundingBox finish;
 static RenderTexture2D target;
-static Item *selectedWeapon = NULL;
+static Item *selectedWeapon;
 
 static Texture2D enemySprites[EnemyTypeSize][EnemyAnimationSize][DirectionSize];
 static Texture2D itemSprites[TotalItemTypeSize];
@@ -195,8 +197,8 @@ static bool CheckCanUncrouch(Body *body);
 static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
 static void UpdateEnemies(void);
 static void UpdateItems(void);
-static void DrawWeapon(void);
-// static void UpdateWeapon(void);
+static void DrawWeapon(Texture2D currentAnimationFrame);
+static Texture2D UpdateWeapon(bool leftMouseClicked);
 
 
 
@@ -316,22 +318,24 @@ bool LoadGame(void)
 
                 switch (animation) {
                 case W_IDLE:
-                    TextAppend(pathWeaponAnimation, "idle/", &pathLength);
+                    TextAppend(pathWeaponAnimation, "idle", &pathLength);
                     break;
                 case W_ATTACK:
-                    TextAppend(pathWeaponAnimation, "attack/", &pathLength);
+                    TextAppend(pathWeaponAnimation, "attack", &pathLength);
                     break;
                 default:
                     TraceLog(LOG_ERROR, "LoadGame: This WeaponAnimation does not exist!");
                     continue;
                 }
 
-                const FilePathList frames = LoadDirectoryFiles(pathWeaponAnimation);
-                weaponAnimations[type][animation].count  = (int)frames.count;
-                weaponAnimations[type][animation].frames = MemAlloc(sizeof(Texture2D) * frames.count);
-                for (unsigned i = 0; i < frames.count; ++i)
+                const unsigned frameNumber = GetDirectoryFileCount(pathWeaponAnimation);
+                weaponAnimations[type][animation].count  = (int)frameNumber;
+                weaponAnimations[type][animation].frames = MemAlloc(sizeof(Texture2D) * frameNumber);
+
+                for (unsigned i = 0; i < frameNumber; ++i)
                 {
-                    weaponAnimations[type][animation].frames[i] = LoadTexture(frames.paths[i]);
+                    const char *framePath = TextFormat("%s/%04d.png", pathWeaponAnimation, i);
+                    weaponAnimations[type][animation].frames[i] = LoadTexture(framePath);
                 }
             }
         }
@@ -457,6 +461,8 @@ bool LoadGame(void)
     };
 
     UpdateCameraFPS(&player.camera);
+
+    selectedWeapon = NULL;
 
     return true;
 }
@@ -600,6 +606,7 @@ void DrawGame(void)
 
         UpdateEnemies();
         UpdateItems();
+        const Texture2D currentAnimationFrame = UpdateWeapon(IsMouseButtonPressed(MOUSE_LEFT_BUTTON));
 
         UpdateCameraFPS(&player.camera);
         //----------------------------------------------------------------------------------
@@ -613,7 +620,8 @@ void DrawGame(void)
                 DrawLevel(player.camera);
             EndMode3D();
 
-            DrawWeapon();
+            if (currentAnimationFrame.height != 0)
+                DrawWeapon(currentAnimationFrame);
 
             // Draw info box
             if (debugMode)
@@ -705,8 +713,8 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
         //PlaySound(fxJump);
     }
 
-    Vector3 front = (Vector3){ sinf(rot), 0.f, cosf(rot) };
-    Vector3 right = (Vector3){ cosf(-rot), 0.f, sinf(-rot) };
+    Vector3 front = (Vector3){ sinf(rot), 0.0f, cosf(rot) };
+    Vector3 right = (Vector3){ cosf(-rot), 0.0f, sinf(-rot) };
 
     Vector3 desiredDir = (Vector3){ input.x*right.x + input.y*front.x
                                   , 0.0f
@@ -726,7 +734,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     // a Player can make the speed faster by bringing the direction closer to horizontal velocity angle
     // More info here: https://youtu.be/v3zT3Z5apaM?t=165
     float maxSpeed = (crouchHold ? CROUCH_SPEED : MAX_SPEED);
-    float accel = Clamp(maxSpeed - speed, 0.f, MAX_ACCEL*delta);
+    float accel = Clamp(maxSpeed - speed, 0.0f, MAX_ACCEL*delta);
     hvel.x += body->dir.x*accel;
     hvel.z += body->dir.z*accel;
 
@@ -871,15 +879,15 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
             const Ray downwardRay = { (Vector3){ body->position.x + cosf(i)*(body->size - 0.001f)
                                                , body->position.y
                                                , body->position.z + sinf(i)*(body->size - 0.001f) }
-                                    , (Vector3){ 0, -1000.f, 0 } };
+                                    , (Vector3){ 0, -1000.0f, 0 } };
 
             const Ray upwardRay   = { (Vector3){ body->position.x + cosf(i)*(body->size - 0.001f)
                                                , body->position.y
                                                , body->position.z + sinf(i)*(body->size - 0.001f) }
-                                    , (Vector3){ 0, 1000.f, 0 } };
+                                    , (Vector3){ 0, 1000.0f, 0 } };
 
-            RayCollision closestFloorCollision = { .distance = 10000.f };
-            RayCollision closestCeilingCollision = { .distance = 10000.f };
+            RayCollision closestFloorCollision = { .distance = 10000.0f };
+            RayCollision closestCeilingCollision = { .distance = 10000.0f };
 
             for (int j = 0; j < map.meshCount; ++j)
             {
@@ -895,7 +903,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 
             if (closestCeilingCollision.hit)
             {
-                if (closestCeilingCollision.distance * 1000.f <= 0.5f)
+                if (closestCeilingCollision.distance * 1000.0f <= 0.5f)
                 {
                     body->position.y = closestCeilingCollision.point.y;
                     body->isGrounded = true;
@@ -903,7 +911,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                     skipGroundCollisionCheck = true;
                     continue;
                 }
-                else if (!crouchHold && closestCeilingCollision.distance * 1000.f <= STAND_HEIGHT)
+                else if (!crouchHold && closestCeilingCollision.distance * 1000.0f <= STAND_HEIGHT)
                 {
                     body->position.y = closestCeilingCollision.point.y - STAND_HEIGHT - 0.15f;
                     body->isGrounded = false;
@@ -913,7 +921,7 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
                 }
             }
 
-            if (closestFloorCollision.hit && closestFloorCollision.distance * 1000.f >= 0.01f)
+            if (closestFloorCollision.hit && closestFloorCollision.distance * 1000.0f >= 0.01f)
                  body->isGrounded = false;
             else {
                 body->isGrounded = true;
@@ -1122,41 +1130,75 @@ static void UpdateItems(void)
 }
 
 
-static void DrawWeapon(void)
+static void DrawWeapon(Texture2D currentAnimationFrame)
 {
-    if (selectedWeapon != NULL)
-    {
-        static int frameCounter = 0;
-
-        AnimationFrames currentAnimationFrames = weaponAnimations[selectedWeapon->type][W_IDLE];
-        if (!IsTextureValid(currentAnimationFrames.frames[frameCounter]))
-        {
-            TraceLog(LOG_ERROR, "DrawWeapon: frame isn't valid!");
-        }
-        // DrawTexture(currentAnimationFrames.frames[frameCounter], 0, 0, WHITE);
-        DrawTextureEx(currentAnimationFrames.frames[frameCounter], Vector2Zero(), 0, 3.0f, WHITE);
-
-
-        static const double timeBetweenAnimationFrames = 1.0 / 12.0;
-        static double time = 0;
-        if (GetTime() - time > timeBetweenAnimationFrames)
-        {
-            ++frameCounter;
-            time = GetTime();
-        }
-
-        if (frameCounter >= currentAnimationFrames.count) frameCounter = 0;
-    }
+    DrawTextureEx(currentAnimationFrame, Vector2Zero(), 0, 3.0f, WHITE);
 }
 
 
-// static void UpdateWeapon(void)
-// {
-//     if (selectedWeapon != NULL )
-//     {
+static Texture2D UpdateWeapon(bool leftMouseClicked)
+{
+    static double coldown = 0;
+    static double frameTime = 0;
+    static int frameCounter = 0;
+    static WeaponAnimation currentAnimation = W_IDLE;
 
-//     }
-// }
+    if (selectedWeapon != NULL)
+    {
+        if (leftMouseClicked && coldown == 0)
+        {
+            coldown = GetTime();
+            frameTime = GetTime();
+            currentAnimation = W_ATTACK;
+            frameCounter = 0;
+        }
+        else
+        {
+            // if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
+            //     ++frameCounter;
+
+            static const double timeBetweenAnimationFrames = 1.0 / ANIMATION_FPS;
+            if (GetTime() - frameTime > timeBetweenAnimationFrames)
+            {
+                ++frameCounter;
+                frameTime = GetTime();
+            }
+
+            // Attack coldown
+            if (coldown != 0)
+            {
+                switch (selectedWeapon->type) {
+                case SLEDGE_HAMMER:
+                    if (GetTime() - coldown > 1.5) coldown = 0;
+                    break;
+                case PISTOL:
+                    break;
+                default:
+                    TraceLog(LOG_ERROR, "UpdateWeapon: this WeaponType does not exist!");
+                }
+            }
+        }
+
+        AnimationFrames currentAnimationFrames = weaponAnimations[selectedWeapon->type][currentAnimation];
+
+
+        if (frameCounter >= currentAnimationFrames.count)
+        {
+            frameCounter = 0;
+            // If attack animation ends, switch to idle
+            if (currentAnimation == W_ATTACK)
+            {
+                currentAnimation = W_IDLE;
+                currentAnimationFrames = weaponAnimations[selectedWeapon->type][currentAnimation];
+            }
+        }
+
+        return currentAnimationFrames.frames[frameCounter];
+    }
+
+    static const Texture2D nullTexture = { 0, 0, 0, 0, 0 };
+    return nullTexture;
+}
 
 
 // Draw game level
