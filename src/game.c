@@ -196,7 +196,7 @@ static void UpdateBody(Body *player, float rot, char side, char forward, bool ju
 static void UpdateEnemies(void);
 static void UpdateItems(void);
 static void DrawWeapon(void);
-static void UpdateWeapon(void);
+// static void UpdateWeapon(void);
 
 
 
@@ -327,7 +327,7 @@ bool LoadGame(void)
                 }
 
                 const FilePathList frames = LoadDirectoryFiles(pathWeaponAnimation);
-                weaponAnimations[type][animation].count  = frames.count;
+                weaponAnimations[type][animation].count  = (int)frames.count;
                 weaponAnimations[type][animation].frames = MemAlloc(sizeof(Texture2D) * frames.count);
                 for (unsigned i = 0; i < frames.count; ++i)
                 {
@@ -560,16 +560,6 @@ void DrawGame(void)
         if (IsKeyPressed(KEY_GRAVE))
             debugMode = !debugMode;
 
-        static Vector3 cameraPosAdd = { 0 };
-        if (IsKeyDown(KEY_DOWN))
-        {
-            cameraPosAdd.x += 0.1;
-        }
-        if (IsKeyDown(KEY_UP))
-        {
-            cameraPosAdd.x -= 0.1;
-        }
-
         // Update
         //----------------------------------------------------------------------------------
         Vector2 mouseDelta = GetMouseDelta();
@@ -588,7 +578,7 @@ void DrawGame(void)
         float delta = GetFrameTime();
         headLerp = Lerp(headLerp, (crouching ? CAMERA_CROUCH_HEIGHT : CAMERA_HEIGHT), 20.0f*delta);
         player.camera.position = (Vector3){
-            player.body.position.x + cameraPosAdd.x,
+            player.body.position.x,
             player.body.position.y + headLerp,
             player.body.position.z,
         };
@@ -647,7 +637,8 @@ void DrawGame(void)
                 {
                     // https://gamemath.com/book/cartesianspace.html#trig_functins
                     // cos(angle) = x, sin(angle) = y
-                    DrawLineV(center, (Vector2) { center.x - cos(i) * radius, center.y - sin(i) * radius }, RED);
+                    DrawLineV(center, (Vector2) { center.x - cosf(i) * radius
+                                                , center.y - sinf(i) * radius }, RED);
                 }
             }
         EndTextureMode();
@@ -669,9 +660,9 @@ static bool CheckCanUncrouch(Body *body)
     // (Sorry for duplicating this for loop i'm cringe
     for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
     {
-        const Ray heightRay = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
+        const Ray heightRay = { (Vector3){ body->position.x + cosf(i)*(body->size - 0.001f)
                                          , body->position.y + CROUCH_HEIGHT
-                                         , body->position.z + sin(i)*(body->size - 0.001f) }
+                                         , body->position.z + sinf(i)*(body->size - 0.001f) }
                               , (Vector3){ 0
                                          , STAND_HEIGHT - CROUCH_HEIGHT
                                          , 0 } };
@@ -761,16 +752,16 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
         const Ray kneeRay = { (Vector3){ body->position.x
                                        , body->position.y + CROUCH_HEIGHT
                                        , body->position.z }
-                            , (Vector3){ cos(i)
+                            , (Vector3){ cosf(i)
                                        , 0
-                                       , sin(i) } };
+                                       , sinf(i) } };
 
         const Ray headRay = { (Vector3){ body->position.x
                                        , body->position.y + STAND_HEIGHT
                                        , body->position.z }
-                            , (Vector3){ cos(i)
+                            , (Vector3){ cosf(i)
                                        , 0
-                                       , sin(i) } };
+                                       , sinf(i) } };
 
         for (int j = 0; j < map.meshCount; ++j)
         {
@@ -877,14 +868,14 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 
         if (!skipGroundCollisionCheck)
         {
-            const Ray downwardRay = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
+            const Ray downwardRay = { (Vector3){ body->position.x + cosf(i)*(body->size - 0.001f)
                                                , body->position.y
-                                               , body->position.z + sin(i)*(body->size - 0.001f) }
+                                               , body->position.z + sinf(i)*(body->size - 0.001f) }
                                     , (Vector3){ 0, -1000.f, 0 } };
 
-            const Ray upwardRay   = { (Vector3){ body->position.x + cos(i)*(body->size - 0.001f)
+            const Ray upwardRay   = { (Vector3){ body->position.x + cosf(i)*(body->size - 0.001f)
                                                , body->position.y
-                                               , body->position.z + sin(i)*(body->size - 0.001f) }
+                                               , body->position.z + sinf(i)*(body->size - 0.001f) }
                                     , (Vector3){ 0, 1000.f, 0 } };
 
             RayCollision closestFloorCollision = { .distance = 10000.f };
@@ -944,13 +935,13 @@ static void UpdateEnemies(void)
         case IDLE:
             if (currentEnemy->data[0] <= 0)
             {
-                currentEnemy->data[0] = (float)(GetRandomValue(10, 15) * 0.1f);
+                currentEnemy->data[0] = (float)GetRandomValue(10, 15) * 0.1f;
                 currentEnemy->data[1] = (float)GetRandomValue(-1, 1);
                 currentEnemy->data[2] = (float)GetRandomValue(-1, 1);
             }
             else currentEnemy->data[0] -= 1.0f/FPS;
-            UpdateBody(&currentEnemy->body, 0.0f, currentEnemy->data[1]
-                                                , currentEnemy->data[2], false, enemyCrouch);
+            UpdateBody(&currentEnemy->body, 0.0f, (char)currentEnemy->data[1]
+                                                , (char)currentEnemy->data[2], false, enemyCrouch);
             break;
         case CHASING:
             break;
@@ -1016,13 +1007,13 @@ static void DrawBodyMapCollision(Body body)
     {
         // https://gamemath.com/book/cartesianspace.html#trig_functins
 
-        const Vector3 kneeVector = { body.position.x + cos(i) * body.size
+        const Vector3 kneeVector = { body.position.x + cosf(i) * body.size
                                    , body.position.y + CROUCH_HEIGHT
-                                   , body.position.z + sin(i) * body.size };
+                                   , body.position.z + sinf(i) * body.size };
 
-        const Vector3 headVector = { body.position.x + cos(i) * body.size
+        const Vector3 headVector = { body.position.x + cosf(i) * body.size
                                    , body.position.y + STAND_HEIGHT
-                                   , body.position.z + sin(i) * body.size };
+                                   , body.position.z + sinf(i) * body.size };
 
         DrawSphereEx(kneeVector, 0.02f, 8, 8, WHITE);
         DrawSphereEx(headVector, 0.02f, 8, 8, WHITE);
@@ -1097,7 +1088,7 @@ static void DrawItems(Camera camera)
         if (items.items[i].status == PICKED_UP) continue;
         DrawBillboard(camera, itemSprites[items.items[i].type]
                      , (Vector3){ items.items[i].pos.x
-                                , items.items[i].hitbox.max.y * 0.25
+                                , items.items[i].hitbox.max.y * 0.25f
                                 , items.items[i].pos.z }
                      , 1.0f, WHITE);
 
@@ -1146,8 +1137,8 @@ static void DrawWeapon(void)
         DrawTextureEx(currentAnimationFrames.frames[frameCounter], Vector2Zero(), 0, 3.0f, WHITE);
 
 
-        static const float timeBetweenAnimationFrames = 1.0f / 12.0f;
-        static float time = 0;
+        static const double timeBetweenAnimationFrames = 1.0 / 12.0;
+        static double time = 0;
         if (GetTime() - time > timeBetweenAnimationFrames)
         {
             ++frameCounter;
@@ -1159,13 +1150,13 @@ static void DrawWeapon(void)
 }
 
 
-static void UpdateWeapon(void)
-{
-    if (selectedWeapon != NULL )
-    {
+// static void UpdateWeapon(void)
+// {
+//     if (selectedWeapon != NULL )
+//     {
 
-    }
-}
+//     }
+// }
 
 
 // Draw game level

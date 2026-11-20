@@ -102,7 +102,7 @@ if (${USE_RAYGUI} STREQUAL "TRUE")
         FetchContent_MakeAvailable(raygui)
 
         add_library(raygui_headers INTERFACE)
-        target_include_directories(raygui_headers INTERFACE
+        target_include_directories(raygui_headers SYSTEM INTERFACE
             "${raygui_SOURCE_DIR}/src"
         )
         set(RAYGUI_TARGET raygui_headers)
@@ -148,19 +148,17 @@ if ("${PLATFORM}" STREQUAL "Web")
         )
     endif()
 elseif ("${PLATFORM}" STREQUAL "Desktop")
-    if ("${BUILD_TYPE}" STREQUAL "Debug")
-        target_compile_options(${PROJECT_NAME} PRIVATE )
-        target_compile_options(${PROJECT_NAME}
-            PRIVATE
-                -Wall               # Enables standard helpful warnings
-                -Wextra             # Enables extra warnings (like unused variables/parameters)
-                -Wpedantic          # Enforces strict ISO C compliance
-                -Wshadow            # Warns if a local variable hides another variable
-                # -Wdouble-promotion  # Warns if a float is accidentally promoted to a double
-                # -Wconversion        # Warns on implicit type conversions (e.g., float to int)
-                -Wuninitialized     # Warns if you use a variable before setting a value
-        )
-    endif()
+    target_compile_options(${PROJECT_NAME}
+        PRIVATE
+            -Wall            # Standard helpful warnings
+            -Wextra          # Extra warnings
+            -Wpedantic       # Enforces strict ISO compliance
+            -Wconversion     # Warns about implicit conversions that may alter values
+            -Wshadow         # Warns if a local variable hides another variable
+            -Wuninitialized  # Warns if you use a variable before setting a value
+            -Wformat=2       # Warns about format string issues in functions like printf/TraceLog
+            -Werror          # Treat warning as errors
+    )
 
     if (WIN32)
         target_link_options(${PROJECT_NAME} PRIVATE -static)
