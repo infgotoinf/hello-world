@@ -12,7 +12,7 @@ build
 
 # Krita specific
 *autosave.kra
-*.kra~
+*~
 
 # Blender specific
 *.blend1

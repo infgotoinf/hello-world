@@ -20,11 +20,12 @@
 
 
 // Movement constants
-#define GRAVITY         46.0f
-#define MAX_SPEED        6.5f
-#define CROUCH_SPEED     2.5f
-#define JUMP_FORCE      10.0f
-#define MAX_ACCEL       50.0f
+#define GRAVITY          46.0f
+#define MAX_SPEED         6.5f
+#define CROUCH_SPEED      2.5f
+#define JUMP_FORCE       10.0f
+#define MAX_ACCEL        30.0f
+#define MAX_ACCEL_SPRINT 60.0f
 // Grounded drag
 #define FRICTION        0.86f
 // Increasing air drag, increases strafing speed
@@ -37,7 +38,7 @@
 #define CAMERA_HEIGHT        1.75f
 #define FOV             80.0f
 
-#define DEFAULT_BODY_SIZE 0.25f
+#define DEFAULT_BODY_SIZE 0.5f
 #define NUM_OF_BODY_COLLISION_VERTECIES 4.0f
 // Using radians instead of degrees
 // 360 degrees = 2 * PI radians
@@ -51,6 +52,8 @@
 #define MAX_MAP_MESH_COUNT 50
 
 #define ANIMATION_FPS    16.0
+
+#define ENEMY_HIT_STUN   0.5f
 
 
 
@@ -79,6 +82,7 @@ typedef enum {
 typedef enum {
     IDLE
    ,CHASING
+   ,IN_PAIN
    ,ATTACKING
    ,DYING
    ,EnemyStatusSize
@@ -105,6 +109,9 @@ typedef struct {
     Body body;
     EnemyType type;
     EnemyStatus status;
+    // data[0] - coldown
+    // data[1] - look x
+    // data[2] - look z
     float data[3];
 } Enemy;
 
@@ -194,11 +201,13 @@ static Model level;
 static void DrawLevel(Camera camera);
 static void UpdateCameraFPS(Camera *camera);
 static bool CheckCanUncrouch(Body *body);
-static void UpdateBody(Body *player, float rot, char side, char forward, bool jumpPressed, bool crouchHold);
+static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold, bool sprintHold);
 static void UpdateEnemies(void);
 static void UpdateItems(void);
 static void DrawWeapon(Texture2D currentAnimationFrame);
 static Texture2D UpdateWeapon(bool leftMouseClicked);
+static void WeaponDamage(Ray rays[], unsigned rayCount, float raySize);
+static void DrawInterface(void);
 
 
 
@@ -207,6 +216,18 @@ static Vector3 CenterMeshPos(Mesh mesh)
     BoundingBox box = GetMeshBoundingBox(mesh);
     return (Vector3){ (box.min.x + box.max.x) * 0.5f, box.min.y, (box.min.z + box.max.z) * 0.5f };
 }
+
+
+static BoundingBox GetBodyBoundingBox(Body body)
+{
+    return (BoundingBox){ (Vector3){ body.position.x - body.size
+                                   , body.position.y
+                                   , body.position.z - body.size }
+                        , (Vector3){ body.position.x + body.size
+                                   , body.position.y + STAND_HEIGHT
+                                   , body.position.z + body.size } };
+}
+
 
 
 bool LoadGame(void)
@@ -578,7 +599,11 @@ void DrawGame(void)
         if (crouching == false && prevFrameCrouchHold == true)
             crouching = !CheckCanUncrouch(&player.body);
 
-        UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching);
+        bool sprinting = IsKeyDown(KEY_LEFT_SHIFT);
+
+        UpdateEnemies();
+        UpdateItems();
+        UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching, sprinting);
         prevFrameCrouchHold = crouching;
 
         float delta = GetFrameTime();
@@ -604,24 +629,23 @@ void DrawGame(void)
         lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
         lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
 
-        UpdateEnemies();
-        UpdateItems();
-        const Texture2D currentAnimationFrame = UpdateWeapon(IsMouseButtonPressed(MOUSE_LEFT_BUTTON));
-
         UpdateCameraFPS(&player.camera);
         //----------------------------------------------------------------------------------
 
         // Draw
         //----------------------------------------------------------------------------------
         BeginTextureMode(target);
-            ClearBackground(RAYWHITE);
+            ClearBackground(SKYBLUE);
 
             BeginMode3D(player.camera);
                 DrawLevel(player.camera);
+                const Texture2D currentAnimationFrame = UpdateWeapon(IsMouseButtonPressed(MOUSE_LEFT_BUTTON));
             EndMode3D();
 
             if (currentAnimationFrame.height != 0)
                 DrawWeapon(currentAnimationFrame);
+
+            DrawInterface();
 
             // Draw info box
             if (debugMode)
@@ -634,7 +658,7 @@ void DrawGame(void)
                 DrawText("- Look around: mouse", 15, 45, 10, BLACK);
                 DrawText(TextFormat("- Velocity Len: (%06.3f)", Vector2Length((Vector2){ player.body.velocity.x, player.body.velocity.z })), 15, 60, 10, BLACK);
                 DrawText(TextFormat("Mouse Pos: %03.02f %03.02f", GetMouseDelta().x, GetMouseDelta().y), 100, 100, 10, PURPLE);
-                DrawText(TextFormat("Player Pos: %03.02f %03.02f", player.camera.position.x, player.camera.position.y), 100, 120, 10, PURPLE);
+                DrawText(TextFormat("Player Pos: %03.02f %03.02f %03.02f", player.body.position.x, player.body.position.y, player.body.position.z), 100, 120, 10, PURPLE);
                 DrawText(TextFormat("Player isGrounded: %d", player.body.isGrounded), 100, 140, 10, PURPLE);
                 DrawText(TextFormat("%02.02f %02.02f %02.02f", player.body.dir.x, player.body.dir.y, player.body.dir.z), 100, 160, 10, PURPLE);
                 DrawText("` TO TURN OFF DEBUG STUFF", 350, 50, 30, RED);
@@ -666,7 +690,7 @@ static bool CheckCanUncrouch(Body *body)
 {
     // Cheking that player can stand up
     // (Sorry for duplicating this for loop i'm cringe
-    for (float i = 0; i < 2 * PI; i += COLLISION_ANGLE_DIFFERENCE)
+    for (float i = 0; i < 2*PI; i += COLLISION_ANGLE_DIFFERENCE)
     {
         const Ray heightRay = { (Vector3){ body->position.x + cosf(i)*(body->size - 0.001f)
                                          , body->position.y + CROUCH_HEIGHT
@@ -691,7 +715,7 @@ static bool CheckCanUncrouch(Body *body)
 
 
 // Update body considering current world state
-void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold)
+static void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed, bool crouchHold, bool sprintHold)
 {
     Vector2 input = (Vector2){ (float)side, (float)-forward };
 
@@ -727,14 +751,15 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     float hvelLength = Vector3Length(hvel); // Magnitude
     if (hvelLength < (MAX_SPEED*0.01f)) hvel = (Vector3){ 0 };
 
-    // This is what creates strafing
-    float speed = Vector3DotProduct(hvel, body->dir);
+
+    float speed = Vector2DotProduct((Vector2){ hvel.x, hvel.z }, (Vector2){ body->dir.x, body->dir.z });
 
     // Whenever the amount of acceleration to add is clamped by the maximum acceleration constant,
     // a Player can make the speed faster by bringing the direction closer to horizontal velocity angle
     // More info here: https://youtu.be/v3zT3Z5apaM?t=165
     float maxSpeed = (crouchHold ? CROUCH_SPEED : MAX_SPEED);
-    float accel = Clamp(maxSpeed - speed, 0.0f, MAX_ACCEL*delta);
+    float maxAccel = (sprintHold && !crouchHold ? MAX_ACCEL_SPRINT : MAX_ACCEL);
+    float accel = Clamp(maxSpeed - speed, 0.0f, maxAccel*delta);
     hvel.x += body->dir.x*accel;
     hvel.z += body->dir.z*accel;
 
@@ -745,11 +770,16 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
     body->position.x += body->velocity.x*delta;
     body->position.z += body->velocity.z*delta;
 
+    // THOSE 2 LINES OF CODE THAT FIX ALL MY COLLISON BUGS!!!
+    if (body->position.y < -2.3f) {
+        body->position.y += 2.0f;
+    }
+
     //----------------------------------------------------------------------------------
     // Checking collision
     //----------------------------------------------------------------------------------
     bool skipGroundCollisionCheck = false;
-    for (float i = COLLISION_ANGLE_DIFFERENCE/2; i < 2 * PI + COLLISION_ANGLE_DIFFERENCE/2; i += COLLISION_ANGLE_DIFFERENCE)
+    for (float i = COLLISION_ANGLE_DIFFERENCE/2; i < 2*PI + COLLISION_ANGLE_DIFFERENCE/2; i += COLLISION_ANGLE_DIFFERENCE)
     {
         // Wall collision
         //----------------------------------------------------------------------------------
@@ -827,7 +857,8 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
         for (int j = 0; j < enemies.count; ++j)
         {
             // Checking that this is not the same entity
-            if (!Vector3Equals(body->position, enemies.enemies[j].body.position))
+            if (enemies.enemies[j].status != DYING
+            && !Vector3Equals(body->position, enemies.enemies[j].body.position))
             {
                 Body enemyBody = enemies.enemies[j].body;
                 BoundingBox enemyBox = { (Vector3){ enemyBody.position.x - enemyBody.size
@@ -932,38 +963,6 @@ void UpdateBody(Body *body, float rot, char side, char forward, bool jumpPressed
 }
 
 
-static void UpdateEnemies(void)
-{
-    for (int i = 0; i < enemies.count; ++i)
-    {
-        static bool enemyCrouch = false;
-
-        Enemy *currentEnemy = &enemies.enemies[i];
-        switch (currentEnemy->status) {
-        case IDLE:
-            if (currentEnemy->data[0] <= 0)
-            {
-                currentEnemy->data[0] = (float)GetRandomValue(10, 15) * 0.1f;
-                currentEnemy->data[1] = (float)GetRandomValue(-1, 1);
-                currentEnemy->data[2] = (float)GetRandomValue(-1, 1);
-            }
-            else currentEnemy->data[0] -= 1.0f/FPS;
-            UpdateBody(&currentEnemy->body, 0.0f, (char)currentEnemy->data[1]
-                                                , (char)currentEnemy->data[2], false, enemyCrouch);
-            break;
-        case CHASING:
-            break;
-        case ATTACKING:
-            break;
-        case DYING:
-            break;
-        default:
-            TraceLog(LOG_ERROR, "UpdateEnemies: This EnemyType does not exist!");
-        }
-    }
-}
-
-
 // Update camera for FPS behaviour
 static void UpdateCameraFPS(Camera *camera)
 {
@@ -1034,13 +1033,59 @@ static void DrawBodyMapCollision(Body body)
     DrawRay((Ray){ bodyKnees, body.dir }, ORANGE);
     DrawRay((Ray){ bodyKnees, body.velocity }, YELLOW);
 
-    BoundingBox bodyBox = { (Vector3){ body.position.x - body.size
-                                     , body.position.y
-                                     , body.position.z - body.size }
-                          , (Vector3){ body.position.x + body.size
-                                     , body.position.y + 100.0f
-                                     , body.position.z + body.size } };
-    DrawBoundingBox(bodyBox, RED);
+    // BoundingBox bodyBox = { (Vector3){ body.position.x - body.size
+    //                                  , body.position.y
+    //                                  , body.position.z - body.size }
+    //                       , (Vector3){ body.position.x + body.size
+    //                                  , body.position.y + 100.0f
+    //                                  , body.position.z + body.size } };
+    //
+    // DrawBoundingBox(bodyBox, RED);
+
+    DrawBoundingBox(GetBodyBoundingBox(body), RED);
+}
+
+
+static void UpdateEnemies(void)
+{
+    for (int i = 0; i < enemies.count; ++i)
+    {
+        static bool enemyCrouch = false;
+
+        Enemy *currentEnemy = &enemies.enemies[i];
+        switch (currentEnemy->status) {
+        case IDLE:
+        case CHASING:
+            if (currentEnemy->data[0] <= 0)
+            {
+                currentEnemy->data[0] = (float)GetRandomValue(10, 15) * 0.1f;
+                currentEnemy->data[1] = (float)GetRandomValue(-1, 1);
+                currentEnemy->data[2] = (float)GetRandomValue(-1, 1);
+            }
+            else currentEnemy->data[0] -= 1.0f/FPS;
+
+            // idk why you need to reverse a sign of data[2], but that makes data and dir point in
+            // the same direction
+            UpdateBody(&currentEnemy->body, 0.0f, (char)currentEnemy->data[1]
+                                                , -(char)currentEnemy->data[2], false, enemyCrouch, false);
+            break;
+        case IN_PAIN:
+            if (currentEnemy->data[0] <= 0) currentEnemy->status = IDLE;
+            else currentEnemy->data[0] -= 1.0f/FPS;
+            UpdateBody(&currentEnemy->body, 0.0f, (char)currentEnemy->data[1]
+                                                , -(char)currentEnemy->data[2], false, enemyCrouch, false);
+
+            if (currentEnemy->body.hp <= 0) currentEnemy->status = DYING;
+            break;
+
+        case ATTACKING:
+            break;
+        case DYING:
+            break;
+        default:
+            TraceLog(LOG_ERROR, "UpdateEnemies: This EnemyType does not exist!");
+        }
+    }
 }
 
 
@@ -1048,42 +1093,59 @@ static void DrawEnemies(Camera camera)
 {
     for (int i = 0; i < enemies.count; ++i)
     {
-        Enemy enemy = enemies.enemies[i];
+        const Enemy enemy = enemies.enemies[i];
         Texture2D enemySprite;
 
-        Vector2 enemyVector = Vector2Subtract(
-            (Vector2){ player.body.position.x, player.body.position.z },
-            (Vector2){ enemy.body.position.x, enemy.body.position.z }
-        );
+        const Vector2 enemyDirVector = { enemy.data[1], enemy.data[2] };
 
-        Vector2 enemyDirVector = { enemy.data[1], enemy.data[2] };
+        switch (enemy.status) {
+        case IDLE:
+        case CHASING:;
+            const Vector2 enemyVector = Vector2Subtract(
+                (Vector2){ player.body.position.x, player.body.position.z },
+                (Vector2){ enemy.body.position.x, enemy.body.position.z }
+            );
+            // Angle from -180.0f to 180.0f
+            const float playerEnemyAngle = Vector2Angle(enemyVector, enemyDirVector) * RAD2DEG;
 
-        float playerEnemyAngle = Vector2Angle(enemyVector, enemyDirVector) * RAD2DEG;
+            if      (fabsf(playerEnemyAngle) < 45.0f)
+                enemySprite = enemySprites[enemy.type][STAND][FRONT];
 
-        // if (debugMode) TraceLog(LOG_DEBUG, "DrawEnemies: playerEnemyAngle %02.02f", playerEnemyAngle);
+            else if (fabsf(playerEnemyAngle) > 135.0f)
+                enemySprite = enemySprites[enemy.type][STAND][BACK];
 
-        if      (fabsf(playerEnemyAngle) < 45.0f)
-            enemySprite = enemySprites[enemy.type][enemy.status][RIGHT];
+            else if (playerEnemyAngle > 45.0f)
+                enemySprite = enemySprites[enemy.type][STAND][RIGHT];
 
-        else if (fabsf(playerEnemyAngle) > 135.0f)
-            enemySprite = enemySprites[enemy.type][enemy.status][FRONT];
-
-        else if (playerEnemyAngle < 0.0f)
-            enemySprite = enemySprites[enemy.type][enemy.status][LEFT];
-
-        else
-            enemySprite = enemySprites[enemy.type][enemy.status][BACK];
-
-        // if (debugMode && !IsTextureValid(enemySprite))
-        //     TraceLog(LOG_ERROR, "DrawEnemies: trying to draw not existing texture %d %d %d", enemy.type, enemy.status, FRONT);
+            else
+                enemySprite = enemySprites[enemy.type][STAND][LEFT];
+            break;
+        case IN_PAIN:
+            enemySprite = enemySprites[enemy.type][PAIN][FRONT];
+            break;
+        case ATTACKING:
+            enemySprite = enemySprites[enemy.type][ATTACK][FRONT];
+            break;
+        case DYING:
+            enemySprite = enemySprites[enemy.type][DYING][FRONT];
+            break;
+        default:
+            TraceLog(LOG_ERROR, "DrawEnemies: this EnemyStatus does not exist!");
+        }
 
         DrawBillboard(camera, enemySprite, (Vector3){ enemy.body.position.x
-                                                    , enemy.body.position.y + enemy.body.size * 4.0f
+                                                    , enemy.body.position.y + STAND_HEIGHT * 0.5f
                                                     , enemy.body.position.z }
                                          , 2.0f, WHITE);
         if (debugMode)
         {
             DrawBodyMapCollision(enemies.enemies->body);
+            DrawRay((Ray){ (Vector3){ enemy.body.position.x
+                                    , enemy.body.position.y + CROUCH_HEIGHT
+                                    , enemy.body.position.z }
+                         , (Vector3){ enemyDirVector.x
+                                    , 0.0f
+                                    , enemyDirVector.y }}, BROWN);
         }
     }
 }
@@ -1169,7 +1231,53 @@ static Texture2D UpdateWeapon(bool leftMouseClicked)
             {
                 switch (selectedWeapon->type) {
                 case SLEDGE_HAMMER:
-                    if (GetTime() - coldown > 1.5) coldown = 0;
+                    if (frameCounter >= 6 && frameCounter <= 9)
+                    {
+                        const Vector2 cameraForward = Vector2Normalize((Vector2){
+                                player.camera.target.x - player.camera.position.x,
+                                player.camera.target.z - player.camera.position.z
+                        });
+
+                        const Vector3 direction    = { cameraForward.x, 0.0f, cameraForward.y };
+                        const Vector3 centerOffset = { -cameraForward.y * player.body.size, 0.0f, cameraForward.x * player.body.size };
+
+                        const Vector3 baseCenter = { player.body.position.x, player.body.position.y + CROUCH_HEIGHT, player.body.position.z };
+                        const Vector3 topCenter  = { player.body.position.x, player.body.position.y + STAND_HEIGHT,  player.body.position.z };
+
+                        const Vector3 positionLeftDown   = Vector3Subtract(baseCenter, centerOffset);
+                        const Vector3 positionCenterDown = baseCenter;
+                        const Vector3 positionRightDown  = Vector3Add(baseCenter, centerOffset);
+
+                        const Vector3 positionLeftUp     = Vector3Subtract(topCenter, centerOffset);
+                        const Vector3 positionCenterUp   = topCenter;
+                        const Vector3 positionRightUp    = Vector3Add(topCenter, centerOffset);
+
+                        Ray rays[6] = {
+                            { positionLeftDown,   direction },
+                            { positionCenterDown, direction },
+                            { positionRightDown,  direction },
+                            { positionLeftUp,     direction },
+                            { positionCenterUp,   direction },
+                            { positionRightUp,    direction },
+                        };
+
+                        float rayDistance = 2.5f;
+                        unsigned numberOfRays = sizeof(rays) / sizeof(Ray);
+                        WeaponDamage(rays, numberOfRays, rayDistance);
+
+                        if (debugMode)
+                            for (int i = 0; i < numberOfRays; ++i)
+                            {
+                                DrawRay(rays[i], LIME);
+
+                                const Vector3 endPoint = Vector3Add(
+                                        rays[i].position,
+                                        Vector3Scale(rays[i].direction, rayDistance)
+                                );
+                                DrawSphere(endPoint, 0.05f, GREEN);
+                            }
+                    }
+                    else if (GetTime() - coldown > 1.5) coldown = 0;
                     break;
                 case PISTOL:
                     break;
@@ -1198,6 +1306,48 @@ static Texture2D UpdateWeapon(bool leftMouseClicked)
 
     static const Texture2D nullTexture = { 0, 0, 0, 0, 0 };
     return nullTexture;
+}
+
+
+static void WeaponDamage(Ray rays[], unsigned rayCount, float rayDistance)
+{
+    for (int i = 0; i < enemies.count; ++i)
+    {
+        Enemy *currentEnemy = &enemies.enemies[i];
+        BoundingBox enemyHitbox = GetBodyBoundingBox(currentEnemy->body);
+        for (int j = 0; j < rayCount; ++j)
+        {
+            RayCollision collision = GetRayCollisionBox(rays[j], enemyHitbox);
+            if (collision.hit && collision.distance <= rayDistance)
+            {
+                switch (selectedWeapon->type) {
+                case SLEDGE_HAMMER:
+                    if (currentEnemy->status != IN_PAIN)
+                    {
+                        currentEnemy->body.hp -= 65;
+                        currentEnemy->body.velocity = Vector3Add(currentEnemy->body.velocity, rays[1].direction);
+                        currentEnemy->status = IN_PAIN;
+                        currentEnemy->data[1] = currentEnemy->body.velocity.x;
+                        currentEnemy->data[2] = currentEnemy->body.velocity.z;
+                        currentEnemy->data[0] = ENEMY_HIT_STUN;
+                    }
+                    break;
+                case PISTOL:
+                    break;
+                default:
+                    TraceLog(LOG_ERROR, "WeaponDamage: this WeaponType does not exist!");
+                }
+                break;
+            }
+        }
+    }
+}
+
+
+static void DrawInterface(void)
+{
+    DrawText(TextFormat("%d", player.body.hp), 20, WINDOW_HEIGHT - GUI_TEXT_SIZE * 4 - 10
+            , GUI_TEXT_SIZE * 4, RED);
 }
 
 

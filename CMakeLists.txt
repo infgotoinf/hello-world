@@ -157,7 +157,7 @@ elseif ("${PLATFORM}" STREQUAL "Desktop")
             -Wshadow         # Warns if a local variable hides another variable
             -Wuninitialized  # Warns if you use a variable before setting a value
             -Wformat=2       # Warns about format string issues in functions like printf/TraceLog
-            -Werror          # Treat warning as errors
+            # -Werror          # Treat warning as errors
     )
 
     if (WIN32)
