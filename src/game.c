@@ -77,6 +77,7 @@ typedef struct {
 typedef enum {
     MEELE
    ,GUNNER
+   ,ME
    ,EnemyTypeSize
 } EnemyType;
 
@@ -193,6 +194,10 @@ static Item *selectedWeapon;
 
 static Texture2D enemySprites[EnemyTypeSize][EnemyAnimationSize][DirectionSize];
 static Texture2D itemSprites[TotalItemTypeSize];
+#define NUMBER_OF_FACES 4
+static Texture2D faces[NUMBER_OF_FACES];
+#define NUMBER_OF_FONTS 2
+static Font fonts[NUMBER_OF_FONTS];
 static AnimationFrames weaponAnimations[WeaponTypeSize][WeaponAnimationSize];
 
 static Model level;
@@ -248,7 +253,7 @@ bool LoadGame(void)
 
             switch (type) {
             case MEELE:
-                TextAppend(pathEnemyType, "self/", &pathLength);
+                TextAppend(pathEnemyType, "meele/", &pathLength);
                 break;
             case GUNNER:
                 TextAppend(pathEnemyType, "gunner/", &pathLength);
@@ -309,6 +314,20 @@ bool LoadGame(void)
                 }
             }
         }
+
+        const char* pathFaces = "assets/art/interface/face/";
+        for (int face = 0; face < NUMBER_OF_FACES; ++face)
+        {
+            char pathFace[256];
+            int pathLength = TextCopy(pathFace, pathFaces);
+
+            TextAppend(pathFace, TextFormat("0%d.png", face), &pathLength);
+            faces[face] = LoadTexture(pathFace);
+        }
+
+        fonts[0] = LoadFont("assets/fonts/unifont-otf/unifont-18.0.01.otf");
+        fonts[1] = LoadFontEx("assets/fonts/freefont-ttf/FreeSerif.ttf", 128, NULL, 0);
+        // SetTextureFilter(fonts[1].texture, TEXTURE_FILTER_ANISOTROPIC_16X);
 
         const char* pathItems = "assets/art/sprites/items/";
         for (int type = 0; type < WeaponTypeSize; ++type)
@@ -1498,8 +1517,21 @@ static void WeaponDamage(Ray rays[], unsigned rayCount, float rayDistance)
 
 static void DrawInterface(void)
 {
-    DrawText(TextFormat("%d", player.body.hp), 20, WINDOW_HEIGHT - GUI_TEXT_SIZE * 4 - 10
-            , GUI_TEXT_SIZE * 4, RED);
+    // DrawRectangle(0, WINDOW_HEIGHT - 100, 300, 100, (Color){ 0, 0, 0, 155 });
+    // DrawText(TextFormat("%d HP", player.body.hp), 20, WINDOW_HEIGHT - GUI_TEXT_SIZE * 4 - 10
+    //         , GUI_TEXT_SIZE * 4, RED);
+
+    DrawRectangle(0, WINDOW_HEIGHT - 75, 225, 75, (Color){ 0, 0, 0, 155 });
+    DrawTextEx(fonts[1], TextFormat("%d HP", player.body.hp)
+              , (Vector2){ 10, WINDOW_HEIGHT - GUI_TEXT_SIZE * 4 - 10 }, GUI_TEXT_SIZE * 5, 0.0f, RED);
+
+    Texture2D currentFace;
+    if      (player.body.hp > 75) currentFace = faces[0];
+    else if (player.body.hp > 50) currentFace = faces[1];
+    else if (player.body.hp > 25) currentFace = faces[2];
+    else                          currentFace = faces[3];
+
+    DrawTextureEx(currentFace, (Vector2){ WINDOW_WIDTH * 0.5f - currentFace.width * 0.5f, WINDOW_HEIGHT - currentFace.height }, 0, 1.0f, WHITE);
 }
 
 
