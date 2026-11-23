@@ -22,4 +22,8 @@ extern bool doExit;
 
 
 
+#define NUMBER_OF_SONGS 4
+extern Music music[NUMBER_OF_SONGS];
+
+
 #endif // GLOBAL_VARS_H

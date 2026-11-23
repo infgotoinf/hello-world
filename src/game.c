@@ -149,6 +149,7 @@ typedef enum {
 typedef enum {
     W_IDLE
    ,W_ATTACK
+   ,W_RELOAD
    ,WeaponAnimationSize
 } WeaponAnimation;
 
@@ -193,13 +194,16 @@ static float walkLerp = 0.0f;
 static float headLerp = STAND_HEIGHT;
 static Vector2 lean = { 0 };
 
-static bool debugMode = true;
+static bool debugMode = false;
+// static bool debugMode = true;
 static bool prevFrameCrouchHold = false;
 
 static Enemies enemies;
 static Items items;
 static Map map;
 static BoundingBox finish;
+#define NUMBER_OF_TRIGERS 2
+static BoundingBox trigger[NUMBER_OF_TRIGERS];
 static RenderTexture2D target;
 static Item *selectedWeapon;
 
@@ -209,10 +213,15 @@ static Texture2D itemSprites[TotalItemTypeSize];
 static Texture2D faces[NUMBER_OF_FACES];
 #define NUMBER_OF_FONTS 2
 static Font fonts[NUMBER_OF_FONTS];
+// Music moved to global vars
+#define NUMBER_OF_SOUNDS 20
+static Sound sounds[NUMBER_OF_SOUNDS];
 static AnimationFrames weaponAnimations[WeaponTypeSize][WeaponAnimationSize];
 
 static Model level;
 
+static int smoothStart;
+static int bulletsLeft;
 
 
 static void DrawLevel(Camera camera);
@@ -253,6 +262,8 @@ static BoundingBox GetBodyBoundingBox(Body body)
 bool LoadGame(void)
 {
     static bool firstLoad = true;
+    smoothStart = 255;
+    bulletsLeft = 7;
 
     if (firstLoad)
     {
@@ -341,6 +352,24 @@ bool LoadGame(void)
         fonts[0] = LoadFont("assets/fonts/unifont-otf/unifont-18.0.01.otf");
         fonts[1] = LoadFontEx("assets/fonts/freefont-ttf/FreeSerif.ttf", 128, NULL, 0);
 
+        music[0] = LoadMusicStream("assets/music/uncertain.mp3");
+        music[1] = LoadMusicStream("assets/music/be_careful.mp3");
+        music[2] = LoadMusicStream("assets/music/earthquake.wav");
+        music[3] = LoadMusicStream("assets/music/Jumper.mp3");
+
+        sounds[0] = LoadSound("assets/sounds/song_transition.mp3");
+        sounds[1] = LoadSound("assets/sounds/death1.wav");
+        sounds[2] = LoadSound("assets/sounds/death2.wav");
+        sounds[3] = LoadSound("assets/sounds/pain1.wav");
+        sounds[4] = LoadSound("assets/sounds/pain2.wav");
+        sounds[5] = LoadSound("assets/sounds/pain3.wav");
+        sounds[6] = LoadSound("assets/sounds/sledge_swing.wav");
+        sounds[7] = LoadSound("assets/sounds/song_transition.mp3");
+        sounds[8] = LoadSound("assets/sounds/swing3.wav");
+        sounds[9]  = LoadSound("assets/sounds/gun1.wav");
+        sounds[10] = LoadSound("assets/sounds/gun2.wav");
+        sounds[11] = LoadSound("assets/sounds/gun3.wav");
+
         const char* pathItems = "assets/art/sprites/items/";
         for (int type = 0; type < WeaponTypeSize; ++type)
         {
@@ -376,6 +405,9 @@ bool LoadGame(void)
                     break;
                 case W_ATTACK:
                     TextAppend(pathWeaponAnimation, "attack", &pathLength);
+                    break;
+                case W_RELOAD:
+                    TextAppend(pathWeaponAnimation, "reload", &pathLength);
                     break;
                 default:
                     TraceLog(LOG_ERROR, "LoadGame: This WeaponAnimation does not exist!");
@@ -420,20 +452,25 @@ bool LoadGame(void)
             const Texture2D texture = level.materials[i].maps[0].texture;
 
             TraceLog(LOG_DEBUG, "Material %d: %3d %3d %3d %3d - %d", i
-                                                              , level.materials[i].maps[0].color.r
-                                                              , level.materials[i].maps[0].color.g
-                                                              , level.materials[i].maps[0].color.b
-                                                              , level.materials[i].maps[0].color.a
-                                                              , texture.format);
+                                                                   , level.materials[i].maps[0].color.r
+                                                                   , level.materials[i].maps[0].color.g
+                                                                   , level.materials[i].maps[0].color.b
+                                                                   , level.materials[i].maps[0].color.a
+                                                                   , texture.format);
         }
     }
 
     const Color spawnColor        = {   0,   0, 255, 255 };
     const Color finishColor       = {   0, 255,   0, 255 };
+    const Color trigerColors[2]   = {
+                                    {   0, 255,   1, 255 },
+                                    {   0, 255,   4, 255 }
+    };
     const Color meeleEnemyColor   = { 255,   0,   0, 255 };
     const Color gunEnemyColor     = { 255,   0, 126, 255 };
 
     const Color sledgeHammerColor = {   0,   0,  12, 255 };
+    const Color pistolColor       = {   0,   0,  45, 255 };
 
     Vector3 spawnPos;
     int enemyCounter = 0;
@@ -446,10 +483,22 @@ bool LoadGame(void)
 
         if      (ColorIsEqual(meshMaterialColor, spawnColor)) spawnPos = CenterMeshPos(level.meshes[i]);
         else if (ColorIsEqual(meshMaterialColor, finishColor)) finish  = GetMeshBoundingBox(level.meshes[i]);
+        else if (ColorIsEqual(meshMaterialColor, trigerColors[0])) trigger[0] = GetMeshBoundingBox(level.meshes[i]);
+        else if (ColorIsEqual(meshMaterialColor, trigerColors[1])) trigger[1] = GetMeshBoundingBox(level.meshes[i]);
         else if (ColorIsEqual(meshMaterialColor, sledgeHammerColor))
         {
             Item item = {
                 .type   = SLEDGE_HAMMER,
+                .hitbox = GetMeshBoundingBox(level.meshes[i]),
+                .pos    = CenterMeshPos(level.meshes[i]),
+                .status = LAYING,
+            };
+            items.items[itemCounter++] = item;
+        }
+        else if (ColorIsEqual(meshMaterialColor, pistolColor))
+        {
+            Item item = {
+                .type   = PISTOL,
                 .hitbox = GetMeshBoundingBox(level.meshes[i]),
                 .pos    = CenterMeshPos(level.meshes[i]),
                 .status = LAYING,
@@ -616,8 +665,12 @@ PauseCode DrawWin()
 
 void DrawGame(void)
 {
+    if (smoothStart > 0) --smoothStart;
+
     static bool isPaused = false;
     static bool prevFramePaused = false;
+    static unsigned currentMusicTrack = 0;
+    static bool stopMusic = false;
 
     bool playerIsAlive = player.body.hp > 0.0f;
     bool playerWon = false;
@@ -625,8 +678,31 @@ void DrawGame(void)
     if (CheckCollisionBoxes(GetBodyBoundingBox(player.body), finish))
         playerWon = true;
 
+    if (CheckCollisionBoxes(GetBodyBoundingBox(player.body), trigger[0]))
+    {
+        if (IsMusicStreamPlaying(music[0]))
+        {
+            StopMusicStream(music[0]);
+            PlaySound(sounds[0]);
+            stopMusic = true;
+        }
+    }
+
+    if (CheckCollisionBoxes(GetBodyBoundingBox(player.body), trigger[1]))
+    {
+        currentMusicTrack = 1;
+        stopMusic = false;
+    }
+
     if (playerWon == true)
     {
+        if (IsMusicStreamPlaying(music[currentMusicTrack]))
+            StopMusicStream(music[currentMusicTrack]);
+
+        if (!IsMusicStreamPlaying(music[3]))
+            PlayMusicStream(music[3]);
+        UpdateMusicStream(music[3]);
+
         switch (DrawWin()) {
         case PAUSE:
         case CONTINUE:
@@ -660,6 +736,8 @@ void DrawGame(void)
 
     if (isPaused)
     {
+        if (!IsMusicStreamPlaying(music[currentMusicTrack]))
+            StopMusicStream(music[currentMusicTrack]);
         switch(DrawPause()) {
         case PAUSE:
         default:
@@ -684,8 +762,42 @@ void DrawGame(void)
     }
     else
     {
+        if (!stopMusic)
+        {
+            if (!IsMusicStreamPlaying(music[currentMusicTrack]))
+                PlayMusicStream(music[currentMusicTrack]);
+            UpdateMusicStream(music[currentMusicTrack]);
+        }
+
         if (IsKeyPressed(KEY_GRAVE))
             debugMode = !debugMode;
+
+
+        static bool haveHammer = false;
+        static bool havePistol = false;
+        for (int i = 0; i < items.count; ++i)
+        {
+            if (items.items[i].status == PICKED_UP && items.items[i].type == SLEDGE_HAMMER)
+                haveHammer = true;
+            if (items.items[i].status == PICKED_UP && items.items[i].type == PISTOL)
+                havePistol = true;
+        }
+        if (selectedWeapon != NULL)
+        {
+            if (selectedWeapon->type != SLEDGE_HAMMER && haveHammer && IsKeyPressed(KEY_ONE))
+                for (int i = 0; i < items.count; ++i)
+                {
+                    if (items.items[i].type == SLEDGE_HAMMER)
+                        selectedWeapon = &items.items[i];
+                }
+            else if (selectedWeapon->type != PISTOL && havePistol && IsKeyPressed(KEY_TWO))
+                for (int i = 0; i < items.count; ++i)
+                {
+                    if (items.items[i].type == PISTOL)
+                        selectedWeapon = &items.items[i];
+                }
+        }
+
 
         // Update
         //----------------------------------------------------------------------------------
@@ -763,6 +875,9 @@ void DrawGame(void)
                           , (Vector2){ WINDOW_WIDTH * 0.4f, WINDOW_HEIGHT * 0.2f }, GUI_TEXT_SIZE * 20, 0.0f, RED);
                 DrawRectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (Color){ 255, 0, 0, 155 });
             }
+
+            if (smoothStart > 0)
+                DrawRectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (Color){ 0, 0, 0, smoothStart });
 
             // Draw info box
             if (debugMode)
@@ -1344,6 +1459,7 @@ static void EnemyAttack(Enemy *enemy, Ray rays[], unsigned rayCount, float rayDi
             case MEELE:
                 player.body.hp -= 10;
                 player.body.velocity = Vector3Add(player.body.velocity, rays[0].direction);
+                PlaySound(sounds[8]);
                 break;
             case GUNNER:
                 player.body.hp -= 10;
@@ -1529,18 +1645,35 @@ static Texture2D UpdateWeapon(bool leftMouseClicked)
     static double frameTime = 0;
     static int frameCounter = 0;
     static WeaponAnimation currentAnimation = W_IDLE;
+    static bool shoot = false;
 
     if (selectedWeapon != NULL)
     {
-        if (leftMouseClicked && coldown == 0)
+        if (selectedWeapon->type == PISTOL && IsKeyDown(KEY_R))
+            currentAnimation = W_RELOAD;
+
+        if ((leftMouseClicked && coldown == 0 && selectedWeapon->type == SLEDGE_HAMMER)
+         || (leftMouseClicked && bulletsLeft != 0 && selectedWeapon->type == PISTOL))
         {
             coldown = GetTime();
             frameTime = GetTime();
             currentAnimation = W_ATTACK;
             frameCounter = 0;
+            shoot = false;
+            if (selectedWeapon->type == SLEDGE_HAMMER)
+                PlaySound(sounds[6]);
+
+            if (selectedWeapon->type == PISTOL)
+            {
+                bulletsLeft -= 1;
+                PlaySound(sounds[GetRandomValue(9, 11)]);
+            }
         }
         else
         {
+            if (leftMouseClicked && bulletsLeft == 0 && selectedWeapon->type == PISTOL)
+                currentAnimation = W_RELOAD;
+
             // if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
             //     ++frameCounter;
 
@@ -1604,6 +1737,15 @@ static Texture2D UpdateWeapon(bool leftMouseClicked)
                     else if (GetTime() - coldown > 1.25) coldown = 0;
                     break;
                 case PISTOL:
+                    if (shoot == false)
+                    {
+                        Ray eyeRay[1] = {
+                            player.camera.position,
+                            Vector3Normalize(Vector3Subtract(player.camera.target, player.camera.position))
+                        };
+                        WeaponDamage(eyeRay, 1, 10.0f);
+                        shoot = true;
+                    }
                     break;
                 default:
                     TraceLog(LOG_ERROR, "UpdateWeapon: this WeaponType does not exist!");
@@ -1614,6 +1756,7 @@ static Texture2D UpdateWeapon(bool leftMouseClicked)
         AnimationFrames currentAnimationFrames = weaponAnimations[selectedWeapon->type][currentAnimation];
 
 
+
         if (frameCounter >= currentAnimationFrames.count)
         {
             frameCounter = 0;
@@ -1621,6 +1764,12 @@ static Texture2D UpdateWeapon(bool leftMouseClicked)
             if (currentAnimation == W_ATTACK)
             {
                 currentAnimation = W_IDLE;
+                currentAnimationFrames = weaponAnimations[selectedWeapon->type][currentAnimation];
+            }
+            if (currentAnimation == W_RELOAD)
+            {
+                currentAnimation = W_IDLE;
+                bulletsLeft = 7;
                 currentAnimationFrames = weaponAnimations[selectedWeapon->type][currentAnimation];
             }
         }
@@ -1654,19 +1803,28 @@ static void WeaponDamage(Ray rays[], unsigned rayCount, float rayDistance)
                         currentEnemy->data[1] = currentEnemy->body.velocity.x;
                         currentEnemy->data[2] = currentEnemy->body.velocity.z;
                         currentEnemy->data[0] = ENEMY_HIT_STUN;
+                        if (currentEnemy->body.hp > 0)
+                            PlaySound(sounds[GetRandomValue(3, 5)]);
+                        else
+                            PlaySound(sounds[GetRandomValue(1, 2)]);
                     }
                     break;
                 case PISTOL:
-                    currentEnemy->body.hp -= 35;
+                    currentEnemy->body.hp -= 25;
                     currentEnemy->body.velocity = Vector3Add(currentEnemy->body.velocity, rays[0].direction);
                     currentEnemy->status = IN_PAIN;
                     currentEnemy->data[1] = currentEnemy->body.velocity.x;
                     currentEnemy->data[2] = currentEnemy->body.velocity.z;
                     currentEnemy->data[0] = ENEMY_HIT_STUN;
+                    if (currentEnemy->body.hp > 0)
+                        PlaySound(sounds[GetRandomValue(3, 5)]);
+                    else
+                        PlaySound(sounds[GetRandomValue(1, 2)]);
                     break;
                 default:
                     TraceLog(LOG_ERROR, "WeaponDamage: this WeaponType does not exist!");
                 }
+
                 break;
             }
         }
@@ -1683,6 +1841,10 @@ static void DrawInterface(void)
     DrawRectangle(0, WINDOW_HEIGHT - 75, 225, 75, (Color){ 0, 0, 0, 155 });
     DrawTextEx(fonts[1], TextFormat("%d HP", player.body.hp)
               , (Vector2){ 10, WINDOW_HEIGHT - GUI_TEXT_SIZE * 4 - 10 }, GUI_TEXT_SIZE * 5, 0.0f, RED);
+
+    DrawRectangle(WINDOW_WIDTH - 200, WINDOW_HEIGHT - 75, 200, 75, (Color){ 0, 0, 0, 155 });
+    DrawTextEx(fonts[1], TextFormat("%d/7", bulletsLeft)
+              , (Vector2){ WINDOW_WIDTH - 100, WINDOW_HEIGHT - GUI_TEXT_SIZE * 4 - 10 }, GUI_TEXT_SIZE * 5, 0.0f, WHITE);
 
     Texture2D currentFace;
     if      (player.body.hp > 75) currentFace = faces[0];

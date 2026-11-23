@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <threads.h>
 
 #include "raylib.h"
 #include "raygui.h"
@@ -51,6 +52,11 @@ void DrawMainMenu(void) {
         DrawGame();
     }
     else {
+        if (!IsMusicStreamPlaying(music[2]))
+            PlayMusicStream(music[2]);
+        UpdateMusicStream(music[2]);
+
+
         BeginDrawing();
 
             ClearBackground(DARKGRAY);
@@ -66,6 +72,7 @@ void DrawMainMenu(void) {
                                      , GUI_TEXT_SIZE + GUI_TEXT_MARGIN }, "Play"))
             {
                 play = true;
+                StopMusicStream(music[2]);
             }
 
             // DrawText("Hello, World!", 200, WINDOW_HEIGHT - 100, GUI_TEXT_SIZE, WHITE);
