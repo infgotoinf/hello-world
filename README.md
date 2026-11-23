@@ -6,9 +6,7 @@
 
 DOOM II clone written in C and Raylib
 
-$(Game screenshots)
-
-_[itch.io Release](https://link)_
+_[itch.io Release](https://infgotoinf.itch.io/hello-world-v001)_
 
 ## Build dependencies
 
