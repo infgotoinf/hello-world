@@ -340,7 +340,6 @@ bool LoadGame(void)
 
         fonts[0] = LoadFont("assets/fonts/unifont-otf/unifont-18.0.01.otf");
         fonts[1] = LoadFontEx("assets/fonts/freefont-ttf/FreeSerif.ttf", 128, NULL, 0);
-        // SetTextureFilter(fonts[1].texture, TEXTURE_FILTER_ANISOTROPIC_16X);
 
         const char* pathItems = "assets/art/sprites/items/";
         for (int type = 0; type < WeaponTypeSize; ++type)
@@ -598,22 +597,62 @@ PauseCode DrawPause(void)
 }
 
 
+PauseCode DrawWin()
+{
+    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON))
+        return MAIN_MENU;
+
+    BeginDrawing();
+
+        ClearBackground(DARKGREEN);
+        DrawTextEx(fonts[1], "You WOn Yay! :D"
+                  , (Vector2){ WINDOW_WIDTH * 0.4f, WINDOW_HEIGHT * 0.2f }, GUI_TEXT_SIZE * 5, 0.0f, GREEN);
+
+    EndDrawing();
+
+    return CONTINUE;
+}
+
+
 void DrawGame(void)
 {
     static bool isPaused = false;
     static bool prevFramePaused = false;
 
+    bool playerIsAlive = player.body.hp > 0.0f;
+    bool playerWon = false;
+
+    if (CheckCollisionBoxes(GetBodyBoundingBox(player.body), finish))
+        playerWon = true;
+
+    if (playerWon == true)
+    {
+        switch (DrawWin()) {
+        case PAUSE:
+        case CONTINUE:
+        default:
+            // Keep everything as it is
+            break;
+        case MAIN_MENU:
+            play = false;
+            break;
+        }
+        return;
+    }
+
     if (prevFramePaused != isPaused) {
         if (prevFramePaused == true)
-        {
             DisableCursor();
-        }
         else
-        {
             EnableCursor();
-        }
 
         prevFramePaused = isPaused;
+    }
+
+    if (playerIsAlive == false && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+    {
+        LoadGame();
+        return;
     }
 
     if (IsKeyPressed(KEY_ESCAPE))
@@ -650,45 +689,48 @@ void DrawGame(void)
 
         // Update
         //----------------------------------------------------------------------------------
-        Vector2 mouseDelta = GetMouseDelta();
-        lookRotation.x -= mouseDelta.x*sensitivity.x;
-        lookRotation.y += mouseDelta.y*sensitivity.y;
-
-        char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
-        char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
-        bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
-        if (crouching == false && prevFrameCrouchHold == true)
-            crouching = !CheckCanUncrouch(&player.body);
-
-        bool sprinting = IsKeyDown(KEY_LEFT_SHIFT);
-
         UpdateEnemies();
-        UpdateItems();
-        UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching, sprinting);
-        prevFrameCrouchHold = crouching;
-
-        float delta = GetFrameTime();
-        headLerp = Lerp(headLerp, (crouching ? CAMERA_CROUCH_HEIGHT : CAMERA_HEIGHT), 20.0f*delta);
-        player.camera.position = (Vector3){
-            player.body.position.x,
-            player.body.position.y + headLerp,
-            player.body.position.z,
-        };
-
-        if (player.body.isGrounded && ((forward != 0) || (sideway != 0)))
+        if (playerIsAlive)
         {
-            headTimer += delta*3.0f;
-            walkLerp = Lerp(walkLerp, 1.0f, 10.0f*delta);
-            player.camera.fovy = Lerp(player.camera.fovy, FOV - 5.0f, 5.0f*delta);
-        }
-        else
-        {
-            walkLerp = Lerp(walkLerp, 0.0f, 10.0f*delta);
-            player.camera.fovy = Lerp(player.camera.fovy, FOV, 5.0f*delta);
-        }
+            Vector2 mouseDelta = GetMouseDelta();
+            lookRotation.x -= mouseDelta.x*sensitivity.x;
+            lookRotation.y += mouseDelta.y*sensitivity.y;
 
-        lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
-        lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
+            char sideway = (IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
+            char forward = (IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
+            bool crouching = IsKeyDown(KEY_LEFT_CONTROL);
+            if (crouching == false && prevFrameCrouchHold == true)
+                crouching = !CheckCanUncrouch(&player.body);
+
+            bool sprinting = IsKeyDown(KEY_LEFT_SHIFT);
+
+            UpdateItems();
+            UpdateBody(&player.body, lookRotation.x, sideway, forward, IsKeyPressed(KEY_SPACE), crouching, sprinting);
+            prevFrameCrouchHold = crouching;
+
+            float delta = GetFrameTime();
+            headLerp = Lerp(headLerp, (crouching ? CAMERA_CROUCH_HEIGHT : CAMERA_HEIGHT), 20.0f*delta);
+            player.camera.position = (Vector3){
+                player.body.position.x,
+                player.body.position.y + headLerp,
+                player.body.position.z,
+            };
+
+            if (player.body.isGrounded && ((forward != 0) || (sideway != 0)))
+            {
+                headTimer += delta*3.0f;
+                walkLerp = Lerp(walkLerp, 1.0f, 10.0f*delta);
+                player.camera.fovy = Lerp(player.camera.fovy, FOV - 5.0f, 5.0f*delta);
+            }
+            else
+            {
+                walkLerp = Lerp(walkLerp, 0.0f, 10.0f*delta);
+                player.camera.fovy = Lerp(player.camera.fovy, FOV, 5.0f*delta);
+            }
+
+            lean.x = Lerp(lean.x, sideway*0.02f, 10.0f*delta);
+            lean.y = Lerp(lean.y, forward*0.015f, 10.0f*delta);
+        }
 
         UpdateCameraFPS(&player.camera);
         //----------------------------------------------------------------------------------
@@ -696,19 +738,31 @@ void DrawGame(void)
         // Draw
         //----------------------------------------------------------------------------------
         BeginTextureMode(target);
-            ClearBackground(BEIGE);
+        ClearBackground(BEIGE);
 
-            BeginMode3D(player.camera);
-                DrawLevel(player.camera);
+        BeginMode3D(player.camera);
+            DrawLevel(player.camera);
+
+            if (playerIsAlive)
+            {
                 const Texture2D currentAnimationFrame = UpdateWeapon(IsMouseButtonPressed(MOUSE_LEFT_BUTTON));
-            EndMode3D();
+                EndMode3D();
 
-            if (currentAnimationFrame.height != 0)
-                DrawWeapon(currentAnimationFrame);
+                if (currentAnimationFrame.height != 0)
+                    DrawWeapon(currentAnimationFrame);
+            }
+            else EndMode3D();
 
             DrawInterface();
 
-            ShowScreenEffects();
+            if (playerIsAlive)
+                ShowScreenEffects();
+            else
+            {
+                DrawTextEx(fonts[1], "RIP"
+                          , (Vector2){ WINDOW_WIDTH * 0.4f, WINDOW_HEIGHT * 0.2f }, GUI_TEXT_SIZE * 20, 0.0f, RED);
+                DrawRectangle(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, (Color){ 255, 0, 0, 155 });
+            }
 
             // Draw info box
             if (debugMode)
@@ -724,7 +778,7 @@ void DrawGame(void)
                 DrawText(TextFormat("Player Pos: %03.02f %03.02f %03.02f", player.body.position.x, player.body.position.y, player.body.position.z), 100, 120, 10, PURPLE);
                 DrawText(TextFormat("Player isGrounded: %d", player.body.isGrounded), 100, 140, 10, PURPLE);
                 DrawText(TextFormat("%02.02f %02.02f %02.02f", player.body.dir.x, player.body.dir.y, player.body.dir.z), 100, 160, 10, PURPLE);
-                DrawText("` TO TURN OFF DEBUG STUFF", 350, 50, 30, RED);
+                DrawText("` TO TURN OFF DEBUG STUFF", 350, 50, 50, RED);
 
                 static const float radius = 75.0f;
                 static const Vector2 center = { WINDOW_WIDTH - 100, 100 };
