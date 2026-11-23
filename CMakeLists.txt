@@ -74,7 +74,7 @@ if (${USE_RAYLIB} STREQUAL "TRUE")
         raylib
         URL https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION}.tar.gz
         URL_HASH SHA256=df7a13129b1bec9e73a6962efff170beba310ee6eab8f94cd000b7316b4db5ee
-        # FIND_PACKAGE_ARGS
+        FIND_PACKAGE_ARGS
     )
 
     FetchContent_MakeAvailable(raylib)
