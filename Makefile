@@ -5,11 +5,9 @@
 # --- Variables ---
 PROJECT_NAME     ?= hello-world
 PROJECT_LANGUAGE ?= C
-PLATFORM   ?= Desktop
-# PLATFORM   ?= Web
 BUILD_TYPE ?= Debug
 # BUILD_TYPE ?= Release
-BUILD_DIR  ?= build/$(PLATFORM)/$(BUILD_TYPE)
+BUILD_DIR  ?= build/$(BUILD_TYPE)
 ASSETS_DIR ?= assets
 
 # --- Dependencies ---
@@ -30,36 +28,24 @@ CMAKE_C_STANDARD   ?= 23
 CMAKE_CXX_STANDARD ?= 23
 CMAKE_GENERATOR    ?= Ninja
 
-# PLATFORM and OS specific logic
-ifeq ($(PLATFORM),Web)
-  CMAKE_COMMAND = emcmake cmake
-else
-  CMAKE_COMMAND = cmake
-endif
-
 
 # Makefile targets
 all: help
 
 build:
-	$(CMAKE_COMMAND) -B $(BUILD_DIR) -DPROJECT_NAME=$(PROJECT_NAME) -DPROJECT_LANGUAGE=$(PROJECT_LANGUAGE) \
-		-DPLATFORM=$(PLATFORM) -DBUILD_TYPE=$(BUILD_TYPE) -DASSETS_DIR=$(ASSETS_DIR) \
+	cmake -B $(BUILD_DIR) -DPROJECT_NAME=$(PROJECT_NAME) -DPROJECT_LANGUAGE=$(PROJECT_LANGUAGE) \
+		-DBUILD_TYPE=$(BUILD_TYPE) -DASSETS_DIR=$(ASSETS_DIR) \
 		-DUSE_RAYLIB=$(USE_RAYLIB) -DUSE_RAYGUI=$(USE_RAYGUI) \
 		-DRAYLIB_VERSION=$(RAYLIB_VERSION) -DRAYGUI_VERSION=$(RAYGUI_VERSION) \
 		-DCMAKE_C_STANDARD=$(CMAKE_C_STANDARD) -DCMAKE_CXX_STANDARD=$(CMAKE_CXX_STANDARD) -G $(CMAKE_GENERATOR)
 	cmake --build $(BUILD_DIR)
 
-ifeq ($(PLATFORM),Web)
-run: build
-	emrun $(BUILD_DIR)/$(PROJECT_NAME)/$(PROJECT_NAME).html
-else
 run: build
 	cd $(BUILD_DIR)/$(PROJECT_NAME) && ./$(PROJECT_NAME)
 
 ifeq ($(BUILD_TYPE),Debug)
 debrun: build
 	cd $(BUILD_DIR)/$(PROJECT_NAME) && gdb-dashboard $(PROJECT_NAME)
-endif
 endif
 
 clean:
@@ -82,10 +68,6 @@ help:
 	@echo "  PROJECT_LANGUAGE  The primary language used for the project. Set to C if it has no C++ code and set to C++ if it has"
 	@echo "                    Current value: $(PROJECT_LANGUAGE)"
 	@echo "                    Possible values: C, C++"
-	@echo ""
-	@echo "  PLATFORM          The platform for which the project will be built"
-	@echo "                    Current value: $(PLATFORM)"
-	@echo "                    Possible values: Desktop, Web"
 	@echo ""
 	@echo "  BUILD_TYPE        Current value: $(BUILD_TYPE)"
 	@echo "                    Possible values: Debug, Release"
@@ -121,7 +103,5 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build"
-	@echo "  make build BUILD_TYPE=Release"
-	@echo "  make run PLATFORM=Web"
-	@echo "  make run PLATFORM=Web BUILD_TYPE=Release"
-	@echo "  make clean"
+	@echo "  make run BUILD_TYPE=Release"
+	@echo "  make clean BUILD_TYPE=Release"

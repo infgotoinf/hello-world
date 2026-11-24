@@ -17,7 +17,7 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            libGL
+            libGLU
             raylib
             raygui
 
@@ -29,9 +29,6 @@
             libXinerama
             libXrandr
 
-            # Web support (uncomment to enable)
-            emscripten
-
             gcc
             cmake
             gnumake
@@ -42,12 +39,19 @@
             pkg-config
             pkgconf
 
+            wayland-scanner
+            gtk3
+            libxkbcommon
+
             # clang-tools
             gdb-dashboard
           ];
 
-          # Audio dependencies
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [pkgs.alsa-lib];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+            libpulseaudio
+            wayland
+            libxkbcommon
+          ]);
         };
       }
     );
