@@ -1,20 +1,4 @@
-#include <stdio.h>
-
 #include "raylib.h"
-#include "raygui.h"
-#if defined(PLATFORM_WEB)
-    #include <emscripten/emscripten.h>
-#endif
-
-#include "include/global_vars.h"
-#include "include/main_menu.h"
-#include "include/game.h"
-
-
-
-bool play = false;
-bool doExit = false;
-Music music[4];
 
 
 
@@ -32,42 +16,42 @@ int main ()
             // | FLAG_WINDOW_MAXIMIZED  // Set to maximize window (expanded to monitor)
     );
 
-    // Create the window and OpenGL context
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Hello, World!");
+    const int screenWidth = 800;
+    const int screenHeight = 450;
 
-    InitAudioDevice();
-
-    // Set text size for raygui elements
-    GuiSetStyle(DEFAULT, TEXT_SIZE, GUI_TEXT_SIZE);
-
-    // Loading assets
-    if (!LoadMainMenu() | !LoadGame()) {
-        printf("Failed loading textures.\n");
-        return 0;
-    }
+    InitWindow(screenWidth, screenHeight, "Hello, World!");
 
     SetExitKey(KEY_NULL);
 
+    int currentFps = 60;
+
+    SetTargetFPS(currentFps);
 
     // Main loop
-#if defined(PLATFORM_WEB)
-    emscripten_set_main_loop(DrawMainMenu, FPS, 1);
-#else
-    SetTargetFPS(FPS);
-
-    while (!WindowShouldClose() && !doExit) // Detect window close button
+    while (!WindowShouldClose())
     {
-        // printf("%d\n", GetRandomValue(1, 5));
-        DrawMainMenu();
+        float mouseWheel = GetMouseWheelMove();
+        if (mouseWheel != 0)
+        {
+            currentFps += (int)mouseWheel;
+            if (currentFps < 0) currentFps = 0;
+            SetTargetFPS(currentFps);
+        }
+
+        BeginDrawing();
+            ClearBackground(RAYWHITE);
+
+            // Draw the help text
+            // Determine what help text to show depending on the current FPS target
+            const char *fpsText = 0;
+            if (currentFps <= 0) fpsText = TextFormat("FPS: unlimited (%i)", GetFPS());
+            else fpsText = TextFormat("FPS: %i (target: %i)", GetFPS(), currentFps);
+            DrawText(fpsText, 10, 10, 20, DARKGRAY);
+            DrawText(TextFormat("Frame time: %02.02f ms", GetFrameTime()*1000.0f), 10, 30, 20, DARKGRAY);
+
+        EndDrawing();
     }
-#endif
 
-
-    // Cleanup
-    UnloadMainMenu();
-    UnloadGame();
-
-    // Destroy the window and cleanup the OpenGL context
     CloseWindow();
     return 0;
 }
